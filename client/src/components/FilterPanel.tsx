@@ -1,33 +1,37 @@
 import { useEffect, useState } from "react";
 import api from "../lib/axios";
+import { CountryPicker } from "./CountryPicker";
+import { countryFlag, countryName } from "../lib/countries";
 import type { GenderPreference, MatchFilters } from "../lib/types";
 
 interface Props {
   filters: MatchFilters;
   onChange: (filters: MatchFilters) => void;
   disabled: boolean;
+  /** What the camera read, used only to label the suggested option. */
+  suggested: GenderPreference | null;
 }
 
 const GENDERS: { value: GenderPreference; label: string }[] = [
   { value: "any", label: "Anyone" },
   { value: "female", label: "Women" },
   { value: "male", label: "Men" },
-  { value: "other", label: "Other" },
 ];
 
-export function FilterPanel({ filters, onChange, disabled }: Props) {
-  const [countries, setCountries] = useState<string[]>([]);
+export function FilterPanel({ filters, onChange, disabled, suggested }: Props) {
+  const [codes, setCodes] = useState<string[]>([]);
   const [online, setOnline] = useState<Record<string, number>>({});
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
     api
       .get<{ countries: string[] }>("/meta/countries")
-      .then((res) => setCountries(Array.isArray(res.data?.countries) ? res.data.countries : []))
-      .catch(() => setCountries([]));
+      .then((res) => setCodes(Array.isArray(res.data?.countries) ? res.data.countries : []))
+      .catch(() => setCodes([]));
   }, []);
 
   // Which countries have someone online, so a filter that guarantees an empty
-  // queue is visibly greyed rather than silently never matching.
+  // queue is visible as such rather than silently never matching.
   useEffect(() => {
     const load = () =>
       api
@@ -44,91 +48,78 @@ export function FilterPanel({ filters, onChange, disabled }: Props) {
     return () => clearInterval(timer);
   }, []);
 
-  const toggleCountry = (code: string) => {
-    const selected = filters.countries.includes(code)
-      ? filters.countries.filter((c) => c !== code)
-      : [...filters.countries, code].slice(0, 10);
+  const setCountries = (next: string[]) => {
     // A city only means something inside exactly one country — the server drops
     // it otherwise, so mirror that rather than show a filter that won't apply.
-    onChange({
-      ...filters,
-      countries: selected,
-      city: selected.length === 1 ? filters.city : null,
-    });
+    onChange({ ...filters, countries: next, city: next.length === 1 ? filters.city : null });
   };
-
-  const selected = new Set(filters.countries);
-  const ordered = [...countries].sort((a, b) => {
-    const diff = (online[b] ?? 0) - (online[a] ?? 0);
-    return diff !== 0 ? diff : a.localeCompare(b);
-  });
 
   return (
     <div className="flex flex-1 flex-col gap-5 overflow-y-auto rounded-2xl bg-white p-4 ring-1 ring-ink-200">
       <section>
         <h2 className="mb-2.5 text-[13px] font-semibold uppercase tracking-wide text-ink-400">
-          Gender
+          Show me
         </h2>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           {GENDERS.map((option) => (
             <button
               key={option.value}
               type="button"
               disabled={disabled}
               onClick={() => onChange({ ...filters, gender: option.value })}
-              className={`rounded-xl px-3 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
+              className={`relative rounded-xl px-3 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
                 filters.gender === option.value
                   ? "bg-brand-500 text-white"
                   : "bg-ink-100 text-ink-700 hover:bg-ink-200"
               }`}
             >
               {option.label}
+              {suggested === option.value && filters.gender !== option.value && (
+                <span
+                  title="Suggested for you"
+                  className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-brand-500"
+                />
+              )}
             </button>
           ))}
         </div>
       </section>
 
       <section>
-        <div className="mb-2.5 flex items-center justify-between">
-          <h2 className="text-[13px] font-semibold uppercase tracking-wide text-ink-400">
-            Country
-          </h2>
-          {filters.countries.length > 0 && (
-            <button
-              type="button"
-              onClick={() => onChange({ ...filters, countries: [], city: null })}
-              className="text-[13px] font-medium text-brand-600 hover:text-brand-700"
-            >
-              Clear
-            </button>
-          )}
-        </div>
+        <h2 className="mb-2.5 text-[13px] font-semibold uppercase tracking-wide text-ink-400">
+          Country
+        </h2>
 
-        <div className="max-h-52 overflow-y-auto rounded-xl bg-ink-100 p-2">
-          <div className="flex flex-wrap gap-1.5">
-            {ordered.map((code) => {
-              const count = online[code] ?? 0;
-              return (
-                <button
-                  key={code}
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => toggleCountry(code)}
-                  className={`rounded-lg px-2 py-1 text-xs font-medium tabular transition-colors disabled:opacity-50 ${
-                    selected.has(code)
-                      ? "bg-brand-500 text-white"
-                      : count > 0
-                        ? "bg-white text-ink-700 ring-1 ring-ink-200 hover:bg-brand-50"
-                        : "bg-white/60 text-ink-400"
-                  }`}
-                >
-                  {code}
-                  {count > 0 && <span className="ml-1 opacity-70">{count}</span>}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => setPickerOpen(true)}
+          className="flex w-full items-center justify-between gap-3 rounded-xl bg-ink-100 px-3.5 py-2.5 text-left transition-colors hover:bg-ink-200 disabled:opacity-50"
+        >
+          <span className="min-w-0 flex-1 truncate text-sm text-ink-900">
+            {filters.countries.length === 0 ? (
+              <span className="text-ink-500">Anywhere</span>
+            ) : (
+              filters.countries
+                .map((code) => `${countryFlag(code)} ${countryName(code)}`)
+                .join(", ")
+            )}
+          </span>
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="shrink-0 text-ink-400"
+            aria-hidden="true"
+          >
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </button>
       </section>
 
       {filters.countries.length === 1 && (
@@ -144,10 +135,20 @@ export function FilterPanel({ filters, onChange, disabled }: Props) {
             value={filters.city ?? ""}
             disabled={disabled}
             onChange={(e) => onChange({ ...filters, city: e.target.value || null })}
-            className="w-full rounded-xl bg-ink-100 px-3.5 py-2.5 text-sm text-ink-900 placeholder:text-ink-400 focus:bg-white focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
+            placeholder="Any city"
+            className="w-full rounded-xl bg-ink-100 px-3.5 py-2.5 text-sm text-ink-900 placeholder:text-ink-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
           />
         </section>
       )}
+
+      <CountryPicker
+        open={pickerOpen}
+        codes={codes}
+        online={online}
+        selected={filters.countries}
+        onClose={() => setPickerOpen(false)}
+        onChange={setCountries}
+      />
     </div>
   );
 }

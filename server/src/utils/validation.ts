@@ -22,7 +22,7 @@ export const registerSchema = z.object({
     .min(8, "Password must be at least 8 characters")
     .max(200, "Password must be at most 200 characters"),
   username: usernameSchema,
-  gender: z.enum(["male", "female", "other"]),
+  gender: z.enum(["male", "female"]),
   country: countrySchema.optional(),
   city: citySchema.optional(),
 });
@@ -50,7 +50,7 @@ export const blockSchema = z.object({
 
 export const updateProfileSchema = z.object({
   username: usernameSchema.optional(),
-  gender: z.enum(["male", "female", "other"]).optional(),
+  gender: z.enum(["male", "female"]).optional(),
   country: countrySchema.nullable().optional(),
   city: citySchema.nullable().optional(),
 });

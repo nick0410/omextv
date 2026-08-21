@@ -5,6 +5,7 @@ import jpeg from "jpeg-js";
 import { OnnxGenderProvider } from "../services/gender/onnx";
 import { GenderService, DEFAULT_GENDER_CONFIG } from "../services/gender/service";
 import { squarifyBox, looksLikeProbabilities } from "../services/gender/imaging";
+import { isDbReady } from "./dbAvailable";
 
 const MODEL_DIR = path.join(process.cwd(), "models");
 const FIXTURES = path.join(MODEL_DIR, "fixtures");
@@ -185,7 +186,9 @@ describe.skipIf(!hasModels)("OnnxGenderProvider against the real models", () => 
     }, 60_000);
   });
 
-  describe("through the service layer", () => {
+  // The service layer reads the user row before scoring, so this one needs a
+  // database; the provider tests above do not.
+  describe.skipIf(!isDbReady())("through the service layer", () => {
     it("turns a blank frame into a no_face outcome", async () => {
       const svc = new GenderService(provider, DEFAULT_GENDER_CONFIG);
       const res = await svc.verify("nonexistent-user", blankFrame().toString("base64"));

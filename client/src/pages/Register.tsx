@@ -3,12 +3,13 @@ import { Link, Navigate, useNavigate } from "react-router-dom";
 import api from "../lib/axios";
 import { useAuthStore } from "../store/authStore";
 import { Logo } from "../components/Logo";
+import { CountryPicker } from "../components/CountryPicker";
+import { countryFlag, countryName } from "../lib/countries";
 import type { Gender } from "../lib/types";
 
 const GENDERS: { value: Gender; label: string }[] = [
   { value: "female", label: "Female" },
   { value: "male", label: "Male" },
-  { value: "other", label: "Other" },
 ];
 
 const field =
@@ -31,6 +32,7 @@ export default function Register() {
     country: "",
   });
   const [countries, setCountries] = useState<string[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
     api
@@ -119,7 +121,7 @@ export default function Register() {
 
           <fieldset>
             <legend className={label}>Gender</legend>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {GENDERS.map((option) => (
                 <button
                   key={option.value}
@@ -138,22 +140,34 @@ export default function Register() {
           </fieldset>
 
           <div>
-            <label htmlFor="country" className={label}>
-              Country
-            </label>
-            <select
-              id="country"
-              value={form.country}
-              onChange={(e) => set("country")(e.target.value)}
-              className={field}
+            <span className={label}>Country</span>
+            <button
+              type="button"
+              onClick={() => setPickerOpen(true)}
+              className={`${field} flex items-center justify-between gap-3 text-left`}
             >
-              <option value="">—</option>
-              {countries.map((code) => (
-                <option key={code} value={code}>
-                  {code}
-                </option>
-              ))}
-            </select>
+              <span className="min-w-0 flex-1 truncate">
+                {form.country ? (
+                  `${countryFlag(form.country)} ${countryName(form.country)}`
+                ) : (
+                  <span className="text-ink-400">Select</span>
+                )}
+              </span>
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="shrink-0 text-ink-400"
+                aria-hidden="true"
+              >
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </button>
           </div>
 
           {error && <p className="text-sm text-danger-500">{error}</p>}
@@ -173,6 +187,16 @@ export default function Register() {
           </p>
         </form>
       </div>
+
+      <CountryPicker
+        open={pickerOpen}
+        codes={countries}
+        online={{}}
+        selected={form.country ? [form.country] : []}
+        maxSelected={1}
+        onClose={() => setPickerOpen(false)}
+        onChange={(next) => set("country")(next[0] ?? "")}
+      />
     </div>
   );
 }

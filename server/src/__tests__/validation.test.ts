@@ -75,6 +75,8 @@ describe("parseMatchFilters", () => {
 
   it("keeps a valid gender preference", () => {
     expect(parseMatchFilters({ gender: "female" }).gender).toBe("female");
+    // Sign-up is binary now, but the filter still accepts "other" so accounts
+    // created before that change remain reachable.
     expect(parseMatchFilters({ gender: "other" }).gender).toBe("other");
   });
 
@@ -137,6 +139,10 @@ describe("registerSchema", () => {
 
   it("rejects an unknown gender", () => {
     expect(registerSchema.safeParse({ ...valid, gender: "unknown" }).success).toBe(false);
+  });
+
+  it("no longer accepts 'other' at sign-up", () => {
+    expect(registerSchema.safeParse({ ...valid, gender: "other" }).success).toBe(false);
   });
 
   it("rejects a country name and accepts a code", () => {

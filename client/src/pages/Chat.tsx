@@ -6,9 +6,9 @@ import { ControlBar } from "../components/ControlBar";
 import { ChatPanel } from "../components/ChatPanel";
 import { FilterPanel } from "../components/FilterPanel";
 import { ReportModal } from "../components/ReportModal";
-import { GenderVerify } from "../components/GenderVerify";
 import { Logo } from "../components/Logo";
-import { DEFAULT_FILTERS } from "../lib/types";
+import { useGenderDetect } from "../hooks/useGenderDetect";
+import { DEFAULT_FILTERS, oppositeGender } from "../lib/types";
 import type { MatchFilters } from "../lib/types";
 
 const FILTERS_KEY = "omextv.filters";
@@ -30,13 +30,38 @@ function formatDuration(ms: number): string {
   return `${minutes}:${seconds}`;
 }
 
+/**
+ * Call duration.
+ *
+ * A separate component so it is mounted only while the call is live: its state
+ * then starts at zero on its own, with no effect resetting it and no clock
+ * read during render. Both of those are what make a timer awkward to write
+ * inline.
+ */
+function CallTimer() {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const startedAt = Date.now();
+    const timer = setInterval(() => setElapsed(Date.now() - startedAt), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <span className="tabular text-sm font-medium text-ink-700">
+      {formatDuration(elapsed)}
+    </span>
+  );
+}
+
 export default function Chat() {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const [filters, setFilters] = useState<MatchFilters>(loadFilters);
   const [showReport, setShowReport] = useState(false);
-  const [tab, setTab] = useState<"chat" | "filters" | "verify">("chat");
-  const [elapsed, setElapsed] = useState(0);
+  const [tab, setTab] = useState<"chat" | "filters">("chat");
+  // Applied at most once, so a deliberate choice is never overwritten.
+  const [suggestionApplied, setSuggestionApplied] = useState(false);
 
   const {
     state,
@@ -58,6 +83,25 @@ export default function Chat() {
     localStorage.setItem(FILTERS_KEY, JSON.stringify(filters));
   }, [filters]);
 
+  // Runs once the camera is up; the result only picks a default.
+  const detect = useGenderDetect(localStream);
+
+  /*
+   * Suggest the opposite gender — but only once, and only if the user has not
+   * already chosen. Re-applying it on every render would fight anyone who
+   * deliberately picks something else.
+   */
+  const suggestion = oppositeGender(detect.detected ?? user?.gender);
+
+  if (
+    !suggestionApplied &&
+    suggestion !== "any" &&
+    filters.gender === "any"
+  ) {
+    setSuggestionApplied(true);
+    setFilters((prev) => ({ ...prev, gender: suggestion }));
+  }
+
   // Warm the camera up front: asking for permission at the moment of matching
   // costs a partner, because the other side waits on a browser prompt.
   useEffect(() => {
@@ -66,15 +110,6 @@ export default function Chat() {
 
   const isLive = state.phase === "live";
 
-  useEffect(() => {
-    if (!isLive) {
-      setElapsed(0);
-      return;
-    }
-    const startedAt = Date.now();
-    const timer = setInterval(() => setElapsed(Date.now() - startedAt), 1000);
-    return () => clearInterval(timer);
-  }, [isLive]);
 
   const inCall = isLive || state.phase === "connecting";
   const filtersLocked = state.phase === "queued" || inCall;
@@ -82,7 +117,6 @@ export default function Chat() {
   const TABS = [
     { id: "chat", label: "Chat" },
     { id: "filters", label: "Filters" },
-    { id: "verify", label: "Verify" },
   ] as const;
 
   return (
@@ -100,9 +134,7 @@ export default function Chat() {
                     LIVE
                   </span>
                 </span>
-                <span className="tabular text-sm font-medium text-ink-700">
-                  {formatDuration(elapsed)}
-                </span>
+                <CallTimer />
               </div>
             )}
 
@@ -200,11 +232,12 @@ export default function Chat() {
           )}
 
           {tab === "filters" && (
-            <FilterPanel filters={filters} onChange={setFilters} disabled={filtersLocked} />
-          )}
-
-          {tab === "verify" && (
-            <GenderVerify localStream={localStream} onRequestCamera={startCamera} />
+            <FilterPanel
+              filters={filters}
+              onChange={setFilters}
+              disabled={filtersLocked}
+              suggested={suggestion === "any" ? null : suggestion}
+            />
           )}
         </aside>
       </main>

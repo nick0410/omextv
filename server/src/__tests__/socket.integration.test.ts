@@ -8,6 +8,7 @@ import { prisma } from "../config/database";
 import { env } from "../config/env";
 import { setupSocket, shutdownSocket, getStats } from "../services/socket";
 import { stores } from "../services/store";
+import { isDbReady } from "./dbAvailable";
 import { Gender } from "../types";
 
 let server: http.Server;
@@ -196,7 +197,7 @@ afterEach(() => {
   while (openSockets.length > 0) openSockets.pop()!.close();
 });
 
-describe("authentication", () => {
+describe.skipIf(!isDbReady())("authentication", () => {
   it("rejects a connection with no token", async () => {
     await expect(connect("")).rejects.toThrow();
   });
@@ -245,7 +246,7 @@ describe("authentication", () => {
   });
 });
 
-describe("single session per account", () => {
+describe.skipIf(!isDbReady())("single session per account", () => {
   it("evicts the older socket when the same user connects twice", async () => {
     const user = await makeUser();
     const first = await connect(user.token);
@@ -264,7 +265,7 @@ describe("single session per account", () => {
   });
 });
 
-describe("matchmaking", () => {
+describe.skipIf(!isDbReady())("matchmaking", () => {
   it("queues the first user and matches the second", async () => {
     const [a, b] = [await makeUser(), await makeUser()];
     const sa = await connect(a.token);
@@ -509,7 +510,7 @@ describe("matchmaking", () => {
   });
 });
 
-describe("room security", () => {
+describe.skipIf(!isDbReady())("room security", () => {
   async function pairUp() {
     const [a, b] = [await makeUser(), await makeUser()];
     const sa = await connect(a.token);
@@ -578,7 +579,7 @@ describe("room security", () => {
   });
 });
 
-describe("chat messages", () => {
+describe.skipIf(!isDbReady())("chat messages", () => {
   async function pairUp() {
     const [a, b] = [await makeUser(), await makeUser()];
     const sa = await connect(a.token);
@@ -642,7 +643,7 @@ describe("chat messages", () => {
   });
 });
 
-describe("leaving a chat", () => {
+describe.skipIf(!isDbReady())("leaving a chat", () => {
   async function pairUp() {
     const [a, b] = [await makeUser(), await makeUser()];
     const sa = await connect(a.token);
@@ -722,7 +723,7 @@ describe("leaving a chat", () => {
   });
 });
 
-describe("disconnects", () => {
+describe.skipIf(!isDbReady())("disconnects", () => {
   async function pairUp() {
     const [a, b] = [await makeUser(), await makeUser()];
     const sa = await connect(a.token);
@@ -791,7 +792,7 @@ describe("disconnects", () => {
   });
 });
 
-describe("gender verification over the socket", () => {
+describe.skipIf(!isDbReady())("gender verification over the socket", () => {
   it("acknowledges a verification attempt", async () => {
     const user = await makeUser();
     const socket = await connect(user.token);
@@ -833,7 +834,7 @@ describe("gender verification over the socket", () => {
   });
 });
 
-describe("stats", () => {
+describe.skipIf(!isDbReady())("stats", () => {
   it("reports live queue and chat counts", async () => {
     const [a, b] = [await makeUser(), await makeUser()];
     const sa = await connect(a.token);

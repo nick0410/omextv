@@ -5,7 +5,9 @@ import { Stores } from "../services/store/types";
 import { serializeEntry, deserializeEntry } from "../services/store/serialize";
 import { makeEntry } from "./helpers";
 
-const REDIS_URL = process.env.REDIS_TEST_URL;
+import { isRedisReady } from "./dbAvailable";
+
+const REDIS_URL = isRedisReady() ? process.env.REDIS_TEST_URL : undefined;
 
 describe("queue entry serialization", () => {
   it("round-trips every field", () => {

@@ -1,7 +1,21 @@
 /** Mirrors the server's socket and HTTP contracts. */
 
-export type Gender = "male" | "female" | "other";
+export type Gender = "male" | "female";
 export type GenderPreference = Gender | "any";
+
+/**
+ * Who to suggest by default.
+ *
+ * The server still accepts and stores "other" for accounts created before it
+ * was removed from the sign-up form, so anything reading a gender off the API
+ * has to tolerate it — hence the widened parameter type here rather than
+ * `Gender`.
+ */
+export function oppositeGender(gender: string | null | undefined): GenderPreference {
+  if (gender === "male") return "female";
+  if (gender === "female") return "male";
+  return "any";
+}
 
 export interface MatchFilters {
   gender: GenderPreference;
@@ -108,7 +122,7 @@ export type CallPhase =
 export const OUTCOME_COPY: Record<VerificationOutcome, string> = {
   accepted: "Verified.",
   low_confidence: "Not a clear enough read. Try better lighting, facing the camera.",
-  unstable: "The frames disagreed with each other. Hold still, face the camera straight on, and make sure the light is even.",
+  unstable: "The frames disagreed with each other.",
   no_face: "No face detected. Centre yourself in frame.",
   multiple_faces: "More than one face in frame. Make sure only you are visible.",
   rate_limited: "Too many attempts. Wait a moment and try again.",
