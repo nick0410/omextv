@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { useAuthStore } from "./store/authStore";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
@@ -13,7 +14,8 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
@@ -28,6 +30,7 @@ export default function App() {
         />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </BrowserRouter>
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 }

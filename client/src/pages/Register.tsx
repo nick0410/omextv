@@ -35,7 +35,7 @@ export default function Register() {
   useEffect(() => {
     api
       .get<{ countries: string[] }>("/meta/countries")
-      .then((res) => setCountries(res.data.countries))
+      .then((res) => setCountries(Array.isArray(res.data?.countries) ? res.data.countries : []))
       .catch(() => setCountries([]));
   }, []);
 

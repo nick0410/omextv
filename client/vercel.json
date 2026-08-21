@@ -4,7 +4,10 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/((?!assets/).*)", "destination": "/index.html" }
+    {
+      "source": "/((?!api/|socket\\.io/).*)",
+      "destination": "/index.html"
+    }
   ],
   "headers": [
     {

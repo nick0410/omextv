@@ -22,7 +22,7 @@ export function FilterPanel({ filters, onChange, disabled }: Props) {
   useEffect(() => {
     api
       .get<{ countries: string[] }>("/meta/countries")
-      .then((res) => setCountries(res.data.countries))
+      .then((res) => setCountries(Array.isArray(res.data?.countries) ? res.data.countries : []))
       .catch(() => setCountries([]));
   }, []);
 
@@ -33,8 +33,9 @@ export function FilterPanel({ filters, onChange, disabled }: Props) {
       api
         .get<{ countries: { country: string; online: number }[] }>("/meta/countries/online")
         .then((res) => {
+          const rows = Array.isArray(res.data?.countries) ? res.data.countries : [];
           const map: Record<string, number> = {};
-          for (const row of res.data.countries) map[row.country] = row.online;
+          for (const row of rows) map[row.country] = row.online;
           setOnline(map);
         })
         .catch(() => setOnline({}));
