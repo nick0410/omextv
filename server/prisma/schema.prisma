@@ -1,0 +1,150 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// A registered user. `gender` is self-declared; `verifiedGender` is what the
+/// vision model inferred from a live camera frame. Matching prefers the
+/// verified value when it is fresh and confident, else falls back to declared.
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash  String
+  username      String    @unique
+
+  // --- Gender ---
+  gender             String // self-declared: "male" | "female" | "other"
+  verifiedGender     String? // model-inferred: "male" | "female" | null
+  genderConfidence   Float? // 0..1 confidence of the last accepted inference
+  genderVerifiedAt   DateTime?
+  genderAttempts     Int       @default(0) // total inference attempts (abuse signal)
+  genderMismatch     Boolean   @default(false) // declared != verified at high confidence
+
+  // --- Location ---
+  country String? // ISO 3166-1 alpha-2, uppercase
+  city    String?
+
+  // --- Premium ---
+  isPremium     Boolean   @default(false)
+  premiumExpiry DateTime?
+
+  // --- Moderation ---
+  isBanned    Boolean   @default(false)
+  bannedUntil DateTime?
+  banReason   String?
+  reportCount Int       @default(0)
+
+  isVerified Boolean   @default(false)
+  lastSeenAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  reports      Report[]      @relation("reporter")
+  reportedBy   Report[]      @relation("reported")
+  sessions     Session[]
+  payments     Payment[]
+  blocksMade   Block[]       @relation("blocker")
+  blocksAgainst Block[]      @relation("blocked")
+  chatsAsA     ChatSession[] @relation("participantA")
+  chatsAsB     ChatSession[] @relation("participantB")
+
+  @@index([isBanned])
+  @@index([country])
+}
+
+/// One completed (or in-flight) 1v1 pairing. Written when the pair is formed
+/// so that a crash mid-chat still leaves a record, updated when it ends.
+model ChatSession {
+  id           String    @id @default(cuid())
+  roomId       String    @unique
+  userAId      String
+  userBId      String
+  startedAt    DateTime  @default(now())
+  endedAt      DateTime?
+  durationMs   Int?
+  /// "skip" | "end" | "disconnect" | "reported" | "timeout" | "server_shutdown"
+  endReason    String?
+  /// which user ended it, null for server-initiated
+  endedById    String?
+  matchedOn    String? // JSON: which filters were in play when matched
+  messageCount Int       @default(0)
+
+  userA   User     @relation("participantA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB   User     @relation("participantB", fields: [userBId], references: [id], onDelete: Cascade)
+  reports Report[]
+
+  @@index([userAId])
+  @@index([userBId])
+  @@index([startedAt])
+  @@index([userAId, userBId])
+}
+
+/// A persistent one-way block. Blocked pairs are never matched, in either
+/// direction.
+model Block {
+  id        String   @id @default(cuid())
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+
+  blocker User @relation("blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@index([blockerId])
+  @@index([blockedId])
+}
+
+model Report {
+  id         String   @id @default(cuid())
+  reporterId String
+  reportedId String
+  sessionId  String?
+  reason     String
+  category   String   @default("other")
+  createdAt  DateTime @default(now())
+
+  reporter User         @relation("reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reported User         @relation("reported", fields: [reportedId], references: [id], onDelete: Cascade)
+  session  ChatSession? @relation(fields: [sessionId], references: [id])
+
+  @@unique([reporterId, sessionId])
+  @@index([reporterId])
+  @@index([reportedId])
+  @@index([createdAt])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+}
+
+model Payment {
+  id                String   @id @default(cuid())
+  userId            String
+  razorpayOrderId   String   @unique
+  razorpayPaymentId String?
+  amount            Int
+  currency          String   @default("INR")
+  plan              String
+  status            String   @default("created")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([razorpayOrderId])
+}

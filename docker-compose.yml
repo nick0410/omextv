@@ -1,0 +1,91 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: omextv
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-omextv}"
+      POSTGRES_DB: omextv
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U omextv"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    # Bound memory with LRU eviction: queue and presence entries all carry
+    # TTLs, so an unbounded Redis is a slow memory leak waiting for a traffic
+    # spike.
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --appendonly no
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # TURN relay. Required for the ~10-15% of calls where both peers sit behind
+  # symmetric NAT and STUN cannot find a direct path.
+  #
+  # For this to work from the public internet, TURN_EXTERNAL_IP must be the
+  # server's public address and UDP 3478 plus the relay range must be open.
+  # On a laptop behind NAT it will only serve peers on the same LAN.
+  coturn:
+    image: coturn/coturn:4.6-alpine
+    network_mode: host
+    command: >
+      -n
+      --realm=${TURN_REALM:-omextv}
+      --use-auth-secret
+      --static-auth-secret=${TURN_SECRET:-dev-turn-secret-change-me}
+      --listening-port=3478
+      --min-port=49160
+      --max-port=49200
+      --no-tls
+      --no-dtls
+      --no-cli
+      --log-file=stdout
+      ${TURN_EXTERNAL_IP:+--external-ip=$TURN_EXTERNAL_IP}
+    profiles: ["turn"]
+
+  server:
+    build: ./server
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: 3001
+      NODE_ENV: production
+      DATABASE_URL: "postgresql://omextv:${POSTGRES_PASSWORD:-omextv}@postgres:5432/omextv?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set}"
+      JWT_EXPIRES_IN: 7d
+      CLIENT_URL: "${CLIENT_URL:-http://localhost:5173}"
+      GENDER_PROVIDER: "${GENDER_PROVIDER:-mock}"
+      GENDER_MODEL_DIR: /app/models
+      TURN_SERVER_URL: "${TURN_SERVER_URL:-}"
+      TURN_SECRET: "${TURN_SECRET:-}"
+      RAZORPAY_KEY_ID: "${RAZORPAY_KEY_ID:-}"
+      RAZORPAY_KEY_SECRET: "${RAZORPAY_KEY_SECRET:-}"
+    volumes:
+      # Model weights are not baked into the image — see server/README.md.
+      - ./server/models:/app/models:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  client:
+    build: ./client
+    ports:
+      - "5173:80"
+    depends_on:
+      - server
+
+volumes:
+  postgres_data:

@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+.env.local
+*.log
+.vercel/
+.DS_Store
+
+# Gender-inference weights: fetched by `npm run models:fetch`, not committed.
+server/models/*.onnx
+server/models/fixtures/
+server/prisma/*.db

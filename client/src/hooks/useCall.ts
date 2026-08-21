@@ -1,0 +1,453 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { getSocket } from "../lib/socket";
+import api from "../lib/axios";
+import type {
+  CallPhase,
+  ChatMessage,
+  IceConfig,
+  MatchFilters,
+  MatchFound,
+  PartnerProfile,
+  QueueError,
+  QueueJoined,
+} from "../lib/types";
+
+/**
+ * The whole call lifecycle in one place.
+ *
+ * Matchmaking, signalling and the peer connection are split across separate
+ * hooks in a lot of codebases, but here they are one state machine: a
+ * `match-found` immediately drives an offer, a `partner-left` must tear the
+ * peer connection down, and a skip has to do both in order. Keeping them
+ * together is what makes that ordering enforceable rather than emergent.
+ */
+
+const FALLBACK_ICE: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
+
+export interface CallState {
+  phase: CallPhase;
+  partner: PartnerProfile | null;
+  roomId: string | null;
+  messages: ChatMessage[];
+  queuePosition: number;
+  queueSize: number;
+  onlineCount: number;
+  error: string | null;
+  partnerTyping: boolean;
+  isMuted: boolean;
+  isCameraOff: boolean;
+  hasTurn: boolean;
+  waitedMs: number;
+}
+
+export function useCall() {
+  const [phase, setPhase] = useState<CallPhase>("idle");
+  const [partner, setPartner] = useState<PartnerProfile | null>(null);
+  const [roomId, setRoomId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [queuePosition, setQueuePosition] = useState(0);
+  const [queueSize, setQueueSize] = useState(0);
+  const [onlineCount, setOnlineCount] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [partnerTyping, setPartnerTyping] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isCameraOff, setIsCameraOff] = useState(false);
+  const [hasTurn, setHasTurn] = useState(false);
+  const [waitedMs, setWaitedMs] = useState(0);
+
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+
+  const peerRef = useRef<RTCPeerConnection | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const roomRef = useRef<string | null>(null);
+  /**
+   * ICE candidates can arrive before the remote description is set, and
+   * addIceCandidate throws if it does. Buffer them until the answer lands.
+   */
+  const pendingCandidates = useRef<RTCIceCandidateInit[]>([]);
+  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Set while intentionally leaving, so teardown does not look like a drop. */
+  const leavingRef = useRef(false);
+
+  // --- Camera ------------------------------------------------------------
+
+  const startCamera = useCallback(async (): Promise<MediaStream | null> => {
+    if (localStreamRef.current) return localStreamRef.current;
+    setPhase("requesting-camera");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
+        audio: { echoCancellation: true, noiseSuppression: true },
+      });
+      localStreamRef.current = stream;
+      setLocalStream(stream);
+      setPhase("idle");
+      return stream;
+    } catch {
+      setPhase("camera-denied");
+      setError("Camera and microphone access is required.");
+      return null;
+    }
+  }, []);
+
+  const stopCamera = useCallback(() => {
+    localStreamRef.current?.getTracks().forEach((t) => t.stop());
+    localStreamRef.current = null;
+    setLocalStream(null);
+  }, []);
+
+  // --- Peer connection ---------------------------------------------------
+
+  const teardownPeer = useCallback(() => {
+    const peer = peerRef.current;
+    if (peer) {
+      peer.onicecandidate = null;
+      peer.ontrack = null;
+      peer.onconnectionstatechange = null;
+      peer.close();
+    }
+    peerRef.current = null;
+    pendingCandidates.current = [];
+    setRemoteStream(null);
+  }, []);
+
+  const createPeer = useCallback(async (room: string, initiator: boolean) => {
+    let ice: RTCIceServer[] = FALLBACK_ICE;
+    try {
+      const { data } = await api.get<IceConfig>("/rtc/ice-servers");
+      ice = data.iceServers?.length ? data.iceServers : FALLBACK_ICE;
+      setHasTurn(Boolean(data.hasTurn));
+    } catch {
+      // A failed ICE fetch still allows same-network calls via STUN.
+      setHasTurn(false);
+    }
+
+    const socket = getSocket();
+    const peer = new RTCPeerConnection({ iceServers: ice, iceCandidatePoolSize: 4 });
+    peerRef.current = peer;
+
+    localStreamRef.current?.getTracks().forEach((track) => {
+      peer.addTrack(track, localStreamRef.current!);
+    });
+
+    peer.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.emit("ice-candidate", { roomId: room, candidate: event.candidate });
+      }
+    };
+
+    peer.ontrack = (event) => {
+      setRemoteStream(event.streams[0]);
+      setPhase("live");
+    };
+
+    peer.onconnectionstatechange = () => {
+      const state = peer.connectionState;
+      if (state === "connected") setPhase("live");
+      // "failed" almost always means no relay was available for this pair.
+      if (state === "failed") {
+        setError(
+          hasTurn
+            ? "The connection dropped."
+            : "Could not connect — this network needs a TURN relay.",
+        );
+        setPhase("partner-lost");
+      }
+    };
+
+    if (initiator) {
+      const offer = await peer.createOffer();
+      await peer.setLocalDescription(offer);
+      socket.emit("offer", { roomId: room, offer });
+    }
+
+    return peer;
+  }, [hasTurn]);
+
+  // --- Socket wiring -----------------------------------------------------
+
+  useEffect(() => {
+    const socket = getSocket();
+
+    const onConnected = (data: { onlineCount: number }) => {
+      setOnlineCount(data.onlineCount ?? 0);
+    };
+
+    const onQueueJoined = (data: QueueJoined) => {
+      setQueuePosition(data.position);
+      setQueueSize(data.size);
+      setPhase("queued");
+      setError(null);
+    };
+
+    const onQueueStatus = (data: { position: number; size: number; online: number }) => {
+      setQueuePosition(data.position);
+      setQueueSize(data.size);
+      setOnlineCount(data.online);
+    };
+
+    const onQueueError = (data: QueueError) => {
+      setError(data.message);
+      setPhase("idle");
+    };
+
+    const onQueueRequeued = (data: { position: number }) => {
+      setQueuePosition(data.position);
+      setPhase("queued");
+    };
+
+    const onMatchFound = async (data: MatchFound) => {
+      roomRef.current = data.roomId;
+      setRoomId(data.roomId);
+      setPartner(data.partner);
+      setMessages([]);
+      setWaitedMs(data.waitedMs);
+      setPhase("connecting");
+      setError(null);
+      leavingRef.current = false;
+      await createPeer(data.roomId, data.isInitiator);
+    };
+
+    const onOffer = async ({ offer }: { offer: RTCSessionDescriptionInit }) => {
+      const peer = peerRef.current;
+      if (!peer) return;
+      await peer.setRemoteDescription(new RTCSessionDescription(offer));
+
+      for (const candidate of pendingCandidates.current) {
+        await peer.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+      }
+      pendingCandidates.current = [];
+
+      const answer = await peer.createAnswer();
+      await peer.setLocalDescription(answer);
+      getSocket().emit("answer", { roomId: roomRef.current, answer });
+    };
+
+    const onAnswer = async ({ answer }: { answer: RTCSessionDescriptionInit }) => {
+      const peer = peerRef.current;
+      if (!peer || peer.signalingState === "stable") return;
+      await peer.setRemoteDescription(new RTCSessionDescription(answer));
+
+      for (const candidate of pendingCandidates.current) {
+        await peer.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+      }
+      pendingCandidates.current = [];
+    };
+
+    const onIceCandidate = async ({ candidate }: { candidate: RTCIceCandidateInit }) => {
+      const peer = peerRef.current;
+      if (!peer || !candidate) return;
+      if (!peer.remoteDescription) {
+        pendingCandidates.current.push(candidate);
+        return;
+      }
+      await peer.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+    };
+
+    const onChatMessage = (message: ChatMessage) => {
+      setMessages((prev) => [...prev, message]);
+      setPartnerTyping(false);
+    };
+
+    const onTyping = ({ isTyping }: { isTyping: boolean }) => {
+      setPartnerTyping(isTyping);
+    };
+
+    const onPartnerLeft = ({ reason }: { reason: string }) => {
+      teardownPeer();
+      setPhase("ended");
+      setPartner(null);
+      roomRef.current = null;
+      setRoomId(null);
+      setError(reason === "timeout" ? "The chat timed out." : null);
+    };
+
+    const onPartnerConnectionLost = ({ graceMs }: { graceMs: number }) => {
+      setPhase("partner-lost");
+      setError(`Reconnecting… (${Math.round(graceMs / 1000)}s)`);
+    };
+
+    const onPartnerReconnected = () => {
+      setPhase("live");
+      setError(null);
+    };
+
+    const onChatEnded = () => {
+      teardownPeer();
+      setPhase(leavingRef.current ? "idle" : "ended");
+      setPartner(null);
+      roomRef.current = null;
+      setRoomId(null);
+    };
+
+    const onSessionReplaced = () => {
+      setError("You signed in somewhere else.");
+      setPhase("ended");
+    };
+
+    socket.on("connected", onConnected);
+    socket.on("queue-joined", onQueueJoined);
+    socket.on("queue-status", onQueueStatus);
+    socket.on("queue-error", onQueueError);
+    socket.on("queue-requeued", onQueueRequeued);
+    socket.on("match-found", onMatchFound);
+    socket.on("offer", onOffer);
+    socket.on("answer", onAnswer);
+    socket.on("ice-candidate", onIceCandidate);
+    socket.on("chat-message", onChatMessage);
+    socket.on("typing", onTyping);
+    socket.on("partner-left", onPartnerLeft);
+    socket.on("partner-connection-lost", onPartnerConnectionLost);
+    socket.on("partner-reconnected", onPartnerReconnected);
+    socket.on("chat-ended", onChatEnded);
+    socket.on("session-replaced", onSessionReplaced);
+
+    return () => {
+      socket.off("connected", onConnected);
+      socket.off("queue-joined", onQueueJoined);
+      socket.off("queue-status", onQueueStatus);
+      socket.off("queue-error", onQueueError);
+      socket.off("queue-requeued", onQueueRequeued);
+      socket.off("match-found", onMatchFound);
+      socket.off("offer", onOffer);
+      socket.off("answer", onAnswer);
+      socket.off("ice-candidate", onIceCandidate);
+      socket.off("chat-message", onChatMessage);
+      socket.off("typing", onTyping);
+      socket.off("partner-left", onPartnerLeft);
+      socket.off("partner-connection-lost", onPartnerConnectionLost);
+      socket.off("partner-reconnected", onPartnerReconnected);
+      socket.off("chat-ended", onChatEnded);
+      socket.off("session-replaced", onSessionReplaced);
+    };
+  }, [createPeer, teardownPeer]);
+
+  // Poll queue position while waiting, so the UI is not frozen on a stale number.
+  useEffect(() => {
+    if (phase !== "queued") return;
+    const socket = getSocket();
+    const timer = setInterval(() => socket.emit("queue-status"), 3000);
+    return () => clearInterval(timer);
+  }, [phase]);
+
+  // --- Actions -----------------------------------------------------------
+
+  const start = useCallback(
+    async (filters: MatchFilters) => {
+      const stream = await startCamera();
+      if (!stream) return;
+      setError(null);
+      getSocket().emit("join-queue", filters);
+    },
+    [startCamera],
+  );
+
+  const cancelQueue = useCallback(() => {
+    getSocket().emit("leave-queue");
+    setPhase("idle");
+  }, []);
+
+  const skip = useCallback(
+    (filters: MatchFilters) => {
+      const room = roomRef.current;
+      leavingRef.current = true;
+      teardownPeer();
+      if (room) getSocket().emit("skip", { roomId: room });
+      roomRef.current = null;
+      setRoomId(null);
+      setPartner(null);
+      setMessages([]);
+      // Straight back into the queue: that is what "next" means here.
+      getSocket().emit("join-queue", filters);
+    },
+    [teardownPeer],
+  );
+
+  const endChat = useCallback(() => {
+    const room = roomRef.current;
+    leavingRef.current = true;
+    teardownPeer();
+    if (room) getSocket().emit("end-chat", { roomId: room });
+    roomRef.current = null;
+    setRoomId(null);
+    setPartner(null);
+    setPhase("idle");
+  }, [teardownPeer]);
+
+  const sendMessage = useCallback((text: string) => {
+    const room = roomRef.current;
+    if (!room || !text.trim()) return;
+    getSocket().emit("chat-message", { roomId: room, text });
+  }, []);
+
+  const setTyping = useCallback((isTyping: boolean) => {
+    const room = roomRef.current;
+    if (!room) return;
+    getSocket().emit("typing", { roomId: room, isTyping });
+    if (typingTimer.current) clearTimeout(typingTimer.current);
+    if (isTyping) {
+      typingTimer.current = setTimeout(() => {
+        getSocket().emit("typing", { roomId: room, isTyping: false });
+      }, 2500);
+    }
+  }, []);
+
+  const toggleMute = useCallback(() => {
+    const stream = localStreamRef.current;
+    if (!stream) return;
+    const next = !isMuted;
+    stream.getAudioTracks().forEach((t) => (t.enabled = !next));
+    setIsMuted(next);
+  }, [isMuted]);
+
+  const toggleCamera = useCallback(() => {
+    const stream = localStreamRef.current;
+    if (!stream) return;
+    const next = !isCameraOff;
+    stream.getVideoTracks().forEach((t) => (t.enabled = !next));
+    setIsCameraOff(next);
+  }, [isCameraOff]);
+
+  // Release the camera and any live peer when the screen unmounts, so the
+  // hardware light does not stay on after navigating away.
+  useEffect(() => {
+    return () => {
+      teardownPeer();
+      localStreamRef.current?.getTracks().forEach((t) => t.stop());
+      localStreamRef.current = null;
+      if (typingTimer.current) clearTimeout(typingTimer.current);
+    };
+  }, [teardownPeer]);
+
+  return {
+    state: {
+      phase,
+      partner,
+      roomId,
+      messages,
+      queuePosition,
+      queueSize,
+      onlineCount,
+      error,
+      partnerTyping,
+      isMuted,
+      isCameraOff,
+      hasTurn,
+      waitedMs,
+    } as CallState,
+    localStream,
+    remoteStream,
+    startCamera,
+    stopCamera,
+    start,
+    cancelQueue,
+    skip,
+    endChat,
+    sendMessage,
+    setTyping,
+    toggleMute,
+    toggleCamera,
+    clearError: () => setError(null),
+  };
+}

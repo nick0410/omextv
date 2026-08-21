@@ -1,0 +1,11 @@
+# Without this, COPY pulls the host's node_modules into the image — native
+# binaries built for the wrong platform, and hundreds of megabytes.
+node_modules
+dist
+.env
+*.log
+prisma/*.db
+models
+src/__tests__
+vitest.config.mts
+.vercel

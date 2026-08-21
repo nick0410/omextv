@@ -1,0 +1,73 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash  String
+  username      String    @unique
+  gender        String    // "male", "female", "other"
+  isVerified    Boolean   @default(false)
+  country       String?
+  city          String?
+  isPremium     Boolean   @default(false)
+  premiumExpiry DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  reports    Report[] @relation("reporter")
+  reportedBy Report[] @relation("reported")
+  sessions   Session[]
+  payments   Payment[]
+}
+
+model Report {
+  id         String   @id @default(cuid())
+  reporterId String
+  reportedId String
+  reason     String
+  createdAt  DateTime @default(now())
+
+  reporter User @relation("reporter", fields: [reporterId], references: [id])
+  reported User @relation("reported", fields: [reportedId], references: [id])
+
+  @@index([reporterId])
+  @@index([reportedId])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+}
+
+model Payment {
+  id              String   @id @default(cuid())
+  userId          String
+  razorpayOrderId String   @unique
+  razorpayPaymentId String?
+  amount          Int
+  currency        String   @default("INR")
+  plan            String
+  status          String   @default("created")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([razorpayOrderId])
+}

@@ -1,0 +1,86 @@
+# Render blueprint: https://render.com/docs/blueprint-spec
+#
+# Deploy with: Render dashboard -> New -> Blueprint -> pick this repo.
+# Everything below is created and wired together automatically; the only manual
+# step is setting CLIENT_URL once the frontend URL is known.
+#
+# Why Render and not Vercel: Socket.io needs a persistent WebSocket connection
+# and a long-lived process (the matchmaking sweep runs on a timer, and the ONNX
+# model stays resident in memory). Vercel's serverless functions provide
+# neither.
+
+databases:
+  - name: omextv-postgres
+    databaseName: omextv
+    user: omextv
+    plan: free
+    postgresMajorVersion: "16"
+
+services:
+  # ---- Redis / Key Value --------------------------------------------------
+  # Holds the matchmaking queue, presence and pairing state. Required for more
+  # than one instance: without it each node keeps its own queue and two users
+  # on different nodes can never be matched with each other.
+  - type: keyvalue
+    name: omextv-redis
+    plan: free
+    ipAllowList: [] # reachable only from inside the Render network
+    maxmemoryPolicy: allkeys-lru
+
+  # ---- API ----------------------------------------------------------------
+  - type: web
+    name: omextv-api
+    runtime: docker
+    plan: free
+    region: singapore # closest to the expected user base; change if needed
+    rootDir: server
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3001"
+
+      - key: DATABASE_URL
+        fromDatabase:
+          name: omextv-postgres
+          property: connectionString
+
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: omextv-redis
+          property: connectionString
+
+      # Generated once by Render and kept stable across deploys. The server
+      # refuses to boot in production if this is short or left at the default.
+      - key: JWT_SECRET
+        generateValue: true
+
+      # Set this to the deployed frontend origin, or CORS will block it.
+      - key: CLIENT_URL
+        sync: false
+
+      # Real local inference. The weights are baked into the image at build
+      # time by scripts/fetch-models.mjs.
+      - key: GENDER_PROVIDER
+        value: onnx
+      - key: GENDER_CLASSIFIER
+        value: insightface
+      - key: GENDER_MODEL_DIR
+        value: /app/models
+
+      # TURN relay. Without one, roughly 10-15% of calls — both peers behind
+      # symmetric NAT — will never connect. Render cannot host this (it needs
+      # a wide UDP port range), so point it at coturn on a VPS or a hosted
+      # provider and set the shared secret here.
+      - key: TURN_SERVER_URL
+        sync: false
+      - key: TURN_SECRET
+        sync: false
+
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
