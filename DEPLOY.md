@@ -1,5 +1,9 @@
 # Deploying Omextv
 
+> **Running it publicly right now, for free, with no card:** see
+> [Quick tunnel](#quick-tunnel-no-account-no-card) below. That is what is live
+> today — the frontend on Vercel talking to the API on your own machine.
+
 Two hosts, because the two halves need different things:
 
 | Part | Host | Why |
@@ -134,3 +138,35 @@ curl https://omextv-api.onrender.com/api/stats
 If `store` is `memory`, `REDIS_URL` did not reach the service. If
 `genderProvider` is `mock`, the model weights are missing from the image —
 check the `fetch-models` step in the build log.
+
+---
+
+## Quick tunnel (no account, no card)
+
+The fastest way to make the local API reachable from the deployed frontend:
+
+```powershell
+powershell -File scripts/tunnel.ps1
+```
+
+That starts a Cloudflare quick tunnel, waits for it to actually serve, updates
+`VITE_API_URL`/`VITE_SOCKET_URL` on Vercel, and rebuilds the frontend against
+the new hostname.
+
+Two things the script exists to get right:
+
+- **`--protocol http2`.** The default is QUIC over UDP, which plenty of
+  networks block. The symptom is nasty: the tunnel connects, serves a handful
+  of requests, then drops into an endless `Retrying connection` loop while the
+  hostname keeps resolving — so the site looks up but every call fails.
+- **`--force` on the deploy.** Only the environment changed, so Vercel would
+  otherwise reuse the cached build and ship the previous, now-dead URL.
+
+### What it costs you
+
+Nothing, but the tunnel only lives as long as the process and the laptop. The
+hostname is random and changes on every restart, and because Vite bakes the
+API URL in at build time, a restart means a rebuild — hence the script.
+
+For something that stays up without your machine, use the Render blueprint
+above, or a free Docker host plus a hosted Postgres.
