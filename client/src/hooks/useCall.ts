@@ -31,6 +31,23 @@ const FALLBACK_ICE: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
  * is common there and has a completely different fix from "you denied
  * permission", but both arrive as a rejected promise.
  */
+/**
+ * Explain a failed peer connection in terms the user can act on.
+ *
+ * "failed" almost always means ICE found no usable path. Whether a relay
+ * candidate was gathered separates "no TURN configured" from "TURN is
+ * configured but did not work", which need different fixes.
+ */
+function connectionFailureMessage(hasTurn: boolean, sawRelay: boolean): string {
+  if (!hasTurn) {
+    return "Could not connect. Calls between two different networks usually need a TURN relay, which is not configured.";
+  }
+  if (!sawRelay) {
+    return "Could not connect — the relay server did not respond. Check the TURN settings.";
+  }
+  return "The connection dropped.";
+}
+
 function cameraErrorMessage(err: unknown): string {
   const name = (err as { name?: string })?.name ?? "";
 
@@ -80,6 +97,15 @@ export function useCall() {
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOff, setIsCameraOff] = useState(false);
   const [hasTurn, setHasTurn] = useState(false);
+  /*
+   * The connection-state handler needs the *current* value, not the one
+   * captured when createPeer was built — createPeer sets it moments earlier,
+   * so a closure over the state would always report the previous value and
+   * blame the wrong thing when a call fails.
+   */
+  const hasTurnRef = useRef(false);
+  /** Did ICE ever produce a relay candidate? The real test of whether TURN works. */
+  const sawRelayRef = useRef(false);
   const [waitedMs, setWaitedMs] = useState(0);
 
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -145,10 +171,13 @@ export function useCall() {
       const { data } = await api.get<IceConfig>("/rtc/ice-servers");
       ice = data.iceServers?.length ? data.iceServers : FALLBACK_ICE;
       setHasTurn(Boolean(data.hasTurn));
+      hasTurnRef.current = Boolean(data.hasTurn);
     } catch {
       // A failed ICE fetch still allows same-network calls via STUN.
       setHasTurn(false);
+      hasTurnRef.current = false;
     }
+    sawRelayRef.current = false;
 
     const socket = getSocket();
     const peer = new RTCPeerConnection({ iceServers: ice, iceCandidatePoolSize: 4 });
@@ -159,9 +188,13 @@ export function useCall() {
     });
 
     peer.onicecandidate = (event) => {
-      if (event.candidate) {
-        socket.emit("ice-candidate", { roomId: room, candidate: event.candidate });
+      if (!event.candidate) return;
+      // A relay candidate is proof the TURN server actually answered; its
+      // absence is why cross-network calls fail.
+      if (event.candidate.candidate?.includes(" typ relay")) {
+        sawRelayRef.current = true;
       }
+      socket.emit("ice-candidate", { roomId: room, candidate: event.candidate });
     };
 
     peer.ontrack = (event) => {
@@ -174,11 +207,7 @@ export function useCall() {
       if (state === "connected") setPhase("live");
       // "failed" almost always means no relay was available for this pair.
       if (state === "failed") {
-        setError(
-          hasTurn
-            ? "The connection dropped."
-            : "Could not connect — this network needs a TURN relay.",
-        );
+        setError(connectionFailureMessage(hasTurnRef.current, sawRelayRef.current));
         setPhase("partner-lost");
       }
     };
@@ -190,7 +219,10 @@ export function useCall() {
     }
 
     return peer;
-  }, [hasTurn]);
+    // Deliberately no `hasTurn` dependency: the handler reads the ref, so
+    // rebuilding this callback on every change would only churn the socket
+    // listeners that depend on it.
+  }, []);
 
   // --- Socket wiring -----------------------------------------------------
 
