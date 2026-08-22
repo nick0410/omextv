@@ -14,9 +14,17 @@
 
 $ErrorActionPreference = 'Stop'
 
-$exe = "C:\Program Files (x86)\cloudflared\cloudflared.exe"
-if (-not (Test-Path $exe)) { $exe = "C:\Program Files\cloudflared\cloudflared.exe" }
-if (-not (Test-Path $exe)) { throw "cloudflared not found. winget install Cloudflare.cloudflared" }
+# cloudflared may be on PATH, installed by winget, or just a downloaded exe
+# sitting in a folder — check all three rather than assuming one.
+$candidates = @(
+  (Get-Command cloudflared -ErrorAction SilentlyContinue).Source,
+  "C:\Program Files (x86)\cloudflared\cloudflared.exe",
+  "C:\Program Files\cloudflared\cloudflared.exe",
+  (Join-Path $env:USERPROFILE 'checker\cloudflared.exe'),
+  (Join-Path $env:USERPROFILE 'cloudflared.exe')
+)
+$exe = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+if (-not $exe) { throw "cloudflared not found. winget install Cloudflare.cloudflared" }
 
 # The API has to be up first, or the tunnel serves 502s.
 try {
@@ -70,6 +78,22 @@ try {
   npx vercel deploy --prod --yes --force 2>&1 | Select-String 'ready' | Select-Object -Last 1
 } finally {
   Pop-Location
+}
+
+# The cached-build failure is silent: the deploy succeeds and the site still
+# serves the previous, dead hostname. Read it back out of the shipped bundle.
+Write-Host 'Verifying the deployed bundle...'
+try {
+  $html = Invoke-WebRequest -Uri 'https://omextv.vercel.app' -TimeoutSec 30 -UseBasicParsing
+  $asset = [regex]::Match($html.Content, '/assets/index-[A-Za-z0-9_-]+\.js').Value
+  $js = Invoke-WebRequest -Uri "https://omextv.vercel.app$asset" -TimeoutSec 45 -UseBasicParsing
+  if ($js.Content -notlike "*$url*") {
+    Write-Warning "The deployed bundle does NOT contain $url. Re-run this script."
+  } else {
+    Write-Host 'Bundle points at the new tunnel.' -ForegroundColor Green
+  }
+} catch {
+  Write-Warning "Could not verify the deployed bundle: $($_.Exception.Message)"
 }
 
 Write-Host ''
