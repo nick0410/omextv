@@ -24,6 +24,33 @@ import type {
 
 const FALLBACK_ICE: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
 
+/**
+ * Turn a getUserMedia rejection into something the user can act on.
+ *
+ * The distinction matters most on phones: "another app is using the camera"
+ * is common there and has a completely different fix from "you denied
+ * permission", but both arrive as a rejected promise.
+ */
+function cameraErrorMessage(err: unknown): string {
+  const name = (err as { name?: string })?.name ?? "";
+
+  switch (name) {
+    case "NotAllowedError":
+    case "SecurityError":
+      return "Camera and microphone access was blocked. Allow it in your browser's site settings and reload.";
+    case "NotFoundError":
+    case "DevicesNotFoundError":
+      return "No camera or microphone was found on this device.";
+    case "NotReadableError":
+    case "TrackStartError":
+      return "Your camera is already in use by another app. Close it and try again.";
+    case "OverconstrainedError":
+      return "Your camera does not support the requested video settings.";
+    default:
+      return "Could not start the camera. Check that this page is served over HTTPS.";
+  }
+}
+
 export interface CallState {
   phase: CallPhase;
   partner: PartnerProfile | null;
@@ -84,9 +111,9 @@ export function useCall() {
       setLocalStream(stream);
       setPhase("idle");
       return stream;
-    } catch {
+    } catch (err) {
       setPhase("camera-denied");
-      setError("Camera and microphone access is required.");
+      setError(cameraErrorMessage(err));
       return null;
     }
   }, []);

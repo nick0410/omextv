@@ -34,6 +34,30 @@ body,
   height: 100%;
 }
 
+/*
+ * Notched phones: with viewport-fit=cover the page extends under the notch and
+ * the home indicator, so the header and the control bar need to be inset or
+ * they end up partly untappable.
+ */
+body {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/*
+ * Mobile browsers report 100vh as the height *without* the collapsing address
+ * bar, so a 100vh layout is taller than the visible area and the bottom
+ * controls sit off-screen until you scroll. dvh tracks the real height.
+ */
+@supports (height: 100dvh) {
+  html,
+  body,
+  #root {
+    height: 100dvh;
+  }
+}
+
 body {
   margin: 0;
   font-family: var(--font-sans);
@@ -54,6 +78,19 @@ body {
 
 button {
   font: inherit;
+}
+
+/* Available to screen readers, invisible on screen. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
 }
 
 .tabular {

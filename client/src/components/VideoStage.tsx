@@ -29,7 +29,7 @@ function Tile({
 }) {
   return (
     <div
-      className={`relative aspect-video max-h-[62vh] w-full overflow-hidden rounded-2xl bg-ink-900 shadow-[0_1px_3px_rgba(15,23,42,0.08),0_8px_24px_rgba(15,23,42,0.06)] ${className}`}
+      className={`relative aspect-video max-h-[38vh] w-full overflow-hidden lg:max-h-[62vh] rounded-2xl bg-ink-900 shadow-[0_1px_3px_rgba(15,23,42,0.08),0_8px_24px_rgba(15,23,42,0.06)] ${className}`}
     >
       {children}
     </div>
@@ -100,9 +100,24 @@ export function VideoStage({
   }, [localStream]);
 
   useEffect(() => {
-    if (remoteRef.current && remoteRef.current.srcObject !== remoteStream) {
-      remoteRef.current.srcObject = remoteStream;
-    }
+    const element = remoteRef.current;
+    if (!element || element.srcObject === remoteStream) return;
+    element.srcObject = remoteStream;
+    if (!remoteStream) return;
+
+    /*
+     * `autoPlay` is not enough on iOS Safari once the stream carries audio:
+     * playback is refused unless it is tied closely to a user gesture, and the
+     * failure is silent — the element just sits there black. Asking
+     * explicitly, and retrying muted if that is refused, is the difference
+     * between "works everywhere" and "works except on iPhone".
+     */
+    element.play().catch(() => {
+      element.muted = true;
+      element.play().catch(() => {
+        // Nothing more to try; the poster state stays visible.
+      });
+    });
   }, [remoteStream]);
 
   const showRemote = Boolean(remoteStream) && phase === "live";

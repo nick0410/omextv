@@ -120,7 +120,8 @@ export default function Chat() {
   ] as const;
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-dvh flex-col">
+      <h1 className="sr-only">Omextv video chat</h1>
       <header className="border-b border-ink-200/70 bg-white/80 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-[1400px] items-center justify-between px-5">
           <Logo />
@@ -149,7 +150,7 @@ export default function Chat() {
 
             <button
               onClick={logout}
-              className="rounded-lg px-2 py-1 text-sm text-ink-500 transition-colors hover:text-ink-900"
+              className="min-h-11 rounded-lg px-3 text-sm text-ink-500 transition-colors hover:text-ink-900"
             >
               Sign out
             </button>
@@ -209,7 +210,7 @@ export default function Chat() {
                 role="tab"
                 aria-selected={tab === item.id}
                 onClick={() => setTab(item.id)}
-                className={`flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                className={`min-h-11 flex-1 rounded-lg px-3 text-sm font-medium transition-colors ${
                   tab === item.id
                     ? "bg-brand-500 text-white"
                     : "text-ink-500 hover:text-ink-900"

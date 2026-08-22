@@ -87,7 +87,7 @@ export function ChatPanel({
           type="submit"
           disabled={disabled || !draft.trim()}
           aria-label="Send"
-          className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-500 text-white transition-colors hover:bg-brand-600 disabled:opacity-40"
+          className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-500 text-white transition-colors hover:bg-brand-600 disabled:opacity-40"
         >
           <svg
             width="18"

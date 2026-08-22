@@ -1,3 +1,24 @@
+---
+title: Omextv API
+emoji: "📹"
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 3001
+pinned: false
+---
+
+<!--
+The block above is Hugging Face Spaces metadata; it is ignored everywhere else.
+`app_port` must match the port the server listens on, and Spaces run the
+container as uid 1000 — which is the `node` user the Dockerfile already
+switches to.
+
+A Space has no Redis, so REDIS_URL is left unset and the in-memory store is
+used. That limits the API to a single instance, which is what the free tier
+runs anyway.
+-->
+
 # Omextv — Backend
 
 Random 1-on-1 video chat. Node + Express + Socket.io + Prisma/Postgres, with Redis for shared state.

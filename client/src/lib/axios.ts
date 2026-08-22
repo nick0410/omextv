@@ -1,15 +1,17 @@
 import axios from "axios";
 import { useAuthStore } from "../store/authStore";
-
-const API_URL = import.meta.env.VITE_API_URL || "";
+import { getApiUrl } from "./apiConfig";
 
 const api = axios.create({
-  baseURL: `${API_URL}/api`,
   headers: { "Content-Type": "application/json" },
   withCredentials: true,
 });
 
 api.interceptors.request.use((config) => {
+  // Resolved per request, not at module load: the runtime config arrives
+  // after this file is first evaluated.
+  config.baseURL = `${getApiUrl()}/api`;
+
   const token = useAuthStore.getState().token;
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;

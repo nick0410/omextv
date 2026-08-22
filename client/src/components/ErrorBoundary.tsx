@@ -33,7 +33,7 @@ export class ErrorBoundary extends Component<Props, State> {
     if (!error) return this.props.children;
 
     return (
-      <div className="grid min-h-screen place-items-center px-5">
+      <div className="grid min-h-dvh place-items-center px-5">
         <div className="w-full max-w-[420px] rounded-2xl bg-white p-6 shadow-[0_1px_3px_rgba(15,23,42,0.06),0_8px_24px_rgba(15,23,42,0.06)]">
           <h1 className="text-lg font-semibold tracking-tight text-ink-900">
             Something went wrong

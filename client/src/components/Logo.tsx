@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 
 export function Logo({ to = "/" }: { to?: string }) {
   return (
-    <Link to={to} className="flex items-center gap-2.5">
+    <Link to={to} className="flex min-h-11 items-center gap-2.5">
       <span className="grid h-8 w-8 place-items-center rounded-[10px] bg-brand-500">
         <svg
           width="17"
