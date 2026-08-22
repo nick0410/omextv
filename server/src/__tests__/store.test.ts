@@ -410,3 +410,30 @@ describe.skipIf(!REDIS_URL)("redis-specific behaviour", () => {
     expect(received).toContainEqual({ from: "a" });
   });
 });
+
+describe.skipIf(!REDIS_URL)("queue entry expiry", () => {
+  let store: Stores;
+
+  beforeAll(async () => {
+    store = new RedisStores(REDIS_URL!);
+    await store.queue.clear();
+  });
+
+  afterAll(async () => {
+    await store?.close();
+  });
+
+  it("gives every queue entry a TTL", async () => {
+    // Without one, a hard shutdown leaves the entry in Redis forever: the
+    // sweep keeps pairing live users with a ghost, `queued` never returns to
+    // zero, and `oldestWaitMs` climbs without bound.
+    await store.queue.enqueue(makeEntry({ userId: "ttl-check" }));
+
+    const redis = (store as unknown as { clients: { ttl(k: string): Promise<number> }[] })
+      .clients[0];
+    const ttl = await redis.ttl("omextv:queue:entry:ttl-check");
+
+    expect(ttl).toBeGreaterThan(0);
+    await store.queue.clear();
+  });
+});

@@ -76,6 +76,29 @@ export async function sweep(now: number = Date.now()): Promise<MatchResult[]> {
 
   const results = await store.queue.withLock(async () => {
     const lanes = await store.queue.snapshot();
+
+    /*
+     * Drop anyone who is no longer connected before matching.
+     *
+     * A hard shutdown leaves entries behind, and pairing a live user with a
+     * ghost wastes their turn: the match is formed, found to be undeliverable,
+     * and torn down again. Checking presence first is cheap and keeps the
+     * queue honest — which also keeps `oldestWaitMs` meaningful as an alarm.
+     */
+    const online = await Promise.all(
+      [...lanes.premium, ...lanes.standard].map((e) =>
+        store.presence.isOnline(e.userId),
+      ),
+    );
+
+    const all = [...lanes.premium, ...lanes.standard];
+    const stale = all.filter((_, i) => !online[i]);
+    for (const entry of stale) await store.queue.remove(entry.userId);
+
+    const live = new Set(all.filter((_, i) => online[i]).map((e) => e.userId));
+    lanes.premium = lanes.premium.filter((e) => live.has(e.userId));
+    lanes.standard = lanes.standard.filter((e) => live.has(e.userId));
+
     const waiting = [...lanes.premium, ...lanes.standard];
     const matched: MatchResult[] = [];
     const claimed = new Set<string>();

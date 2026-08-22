@@ -29,6 +29,17 @@ const K = {
 /** How long a presence record survives without a heartbeat. */
 const PRESENCE_TTL_SEC = 90;
 
+/**
+ * How long a queue entry survives.
+ *
+ * A graceful shutdown clears the queue, but a hard kill does not — and without
+ * an expiry those entries sit in Redis forever. The sweep then burns work on
+ * ghosts every couple of seconds, `queued` never returns to zero, and
+ * `oldestWaitMs` climbs without bound, which quietly destroys its value as a
+ * starvation alarm. Comfortably longer than any legitimate wait.
+ */
+const QUEUE_TTL_SEC = 60 * 60;
+
 // ---------------------------------------------------------------------------
 // Presence
 // ---------------------------------------------------------------------------
@@ -372,7 +383,7 @@ class RedisQueueStore implements QueueStore {
       // the original timestamp keeps the user's place rather than sending them
       // to the back.
       .zadd(K.queueLane(lane), entry.joinedAt, entry.userId)
-      .set(K.queueEntry(entry.userId), serializeEntry(entry))
+      .set(K.queueEntry(entry.userId), serializeEntry(entry), "EX", QUEUE_TTL_SEC)
       .exec();
   }
 
