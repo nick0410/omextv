@@ -12,8 +12,10 @@
  * becomes a file edit that takes effect on the next page load, with no build
  * involved.
  *
- * The build-time value still wins when present, and is what a real deployment
- * should use — the remote lookup only fills in when it is absent.
+ * The runtime document wins over the build-time value when both are present.
+ * That is the whole point: the baked-in host is the fallback for when the
+ * lookup fails, not the authority. A deployment with a stable API should set
+ * only the build-time value and leave VITE_CONFIG_URL unset.
  */
 
 const BUILD_TIME_API = import.meta.env.VITE_API_URL || "";

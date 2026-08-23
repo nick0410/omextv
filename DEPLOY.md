@@ -149,24 +149,44 @@ The fastest way to make the local API reachable from the deployed frontend:
 powershell -File scripts/tunnel.ps1
 ```
 
-That starts a Cloudflare quick tunnel, waits for it to actually serve, updates
-`VITE_API_URL`/`VITE_SOCKET_URL` on Vercel, and rebuilds the frontend against
-the new hostname.
+That starts a Cloudflare quick tunnel, waits for it to serve, writes the new
+hostname into `runtime-config.json`, and pushes it.
 
-Two things the script exists to get right:
+The deployed client fetches that file at boot, so **a new tunnel no longer
+needs a rebuild** — the next page load picks it up. Previously this rewrote
+`VITE_API_URL` on Vercel and forced a rebuild, which left the site dead for
+the several minutes the build took, every single time the tunnel restarted.
+
+Three things the script exists to get right:
 
 - **`--protocol http2`.** The default is QUIC over UDP, which plenty of
   networks block. The symptom is nasty: the tunnel connects, serves a handful
   of requests, then drops into an endless `Retrying connection` loop while the
   hostname keeps resolving — so the site looks up but every call fails.
-- **`--force` on the deploy.** Only the environment changed, so Vercel would
-  otherwise reuse the cached build and ship the previous, now-dead URL.
+- **It does not abort when the new hostname is unreachable from this machine.**
+  A fresh `trycloudflare.com` name takes a moment to propagate, and some
+  resolvers hand back only an unroutable AAAA record for it. Treating that as
+  failure once left the site pointed at the previous, genuinely dead tunnel.
+- **It reads the published document back** before claiming success, because
+  `raw.githubusercontent.com` caches for five minutes.
+
+The config document lives at
+`https://raw.githubusercontent.com/nick0410/omextv/main/runtime-config.json`
+and the client reads it because `VITE_CONFIG_URL` is set on Vercel. This is
+why the repo is public: there is nowhere else free to host a small file that
+changes often. A deployment with a stable API should leave `VITE_CONFIG_URL`
+unset and use `VITE_API_URL` alone.
 
 ### What it costs you
 
-Nothing, but the tunnel only lives as long as the process and the laptop. The
-hostname is random and changes on every restart, and because Vite bakes the
-API URL in at build time, a restart means a rebuild — hence the script.
+Nothing, but the tunnel only lives as long as the process and the laptop, and
+the hostname is random and changes on every restart. Bring the whole local
+backend up in the right order with:
+
+```powershell
+powershell -File scripts/start-stack.ps1   # Postgres, Redis, API
+powershell -File scripts/status.ps1        # is any of it actually serving?
+```
 
 For something that stays up without your machine, use the Render blueprint
 above, or a free Docker host plus a hosted Postgres.

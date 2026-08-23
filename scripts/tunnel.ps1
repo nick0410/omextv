@@ -77,34 +77,56 @@ if ($ok) {
   Write-Warning "Could not reach $url from this machine (likely local DNS). Deploying anyway."
 }
 
-Push-Location (Join-Path $PSScriptRoot '..\client')
+# Publish the new hostname where the deployed client will look for it.
+#
+# This used to rewrite the Vercel environment and force a rebuild, which took
+# minutes and shipped a hostname baked into the bundle — so the site was dead
+# for the whole build every time the tunnel restarted. The client now reads
+# runtime-config.json at boot, so a push is enough and the next page load
+# picks it up.
+$repo = Join-Path $PSScriptRoot '..'
+$configPath = Join-Path $repo 'runtime-config.json'
+
+$config = [ordered]@{
+  _comment  = 'Where the live API is. Rewritten by scripts/tunnel.ps1; the deployed client reads it at boot so a new tunnel needs no rebuild.'
+  updatedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+  apiUrl    = $url
+  socketUrl = $url
+}
+$config | ConvertTo-Json | Set-Content -Path $configPath -Encoding UTF8
+
+Push-Location $repo
 try {
-  foreach ($name in 'VITE_API_URL', 'VITE_SOCKET_URL') {
-    npx vercel env rm $name production --yes 2>&1 | Out-Null
-    $url | npx vercel env add $name production 2>&1 | Out-Null
+  git add runtime-config.json
+  # Nothing to do if the tunnel came back on the same hostname.
+  git diff --cached --quiet
+  if ($LASTEXITCODE -eq 0) {
+    Write-Host 'Hostname unchanged; nothing to publish.'
+  } else {
+    git commit -q -m "Point the client at $url"
+    git push -q origin main
+    Write-Host 'Published the new hostname.' -ForegroundColor Green
   }
-  Write-Host 'Rebuilding the frontend against the new tunnel...'
-  # --force because only the environment changed; Vercel would otherwise reuse
-  # the cached build and ship the previous, now-dead URL.
-  npx vercel deploy --prod --yes --force 2>&1 | Select-String 'ready' | Select-Object -Last 1
 } finally {
   Pop-Location
 }
 
-# The cached-build failure is silent: the deploy succeeds and the site still
-# serves the previous, dead hostname. Read it back out of the shipped bundle.
-Write-Host 'Verifying the deployed bundle...'
-try {
-  $html = Invoke-WebRequest -Uri 'https://omextv.vercel.app' -TimeoutSec 30 -UseBasicParsing
-  $asset = [regex]::Match($html.Content, '/assets/index-[A-Za-z0-9_-]+\.js').Value
-  $js = Invoke-WebRequest -Uri "https://omextv.vercel.app$asset" -TimeoutSec 45 -UseBasicParsing
-  if ($js.Content -notlike "*$url*") {
-    Write-Warning "The deployed bundle does NOT contain $url. Re-run this script."
-  } else {
-    Write-Host 'Bundle points at the new tunnel.' -ForegroundColor Green
-  }
-} catch {
-  Write-Warning "Could not verify the deployed bundle: $($_.Exception.Message)"
+# raw.githubusercontent.com caches for five minutes, and the client appends a
+# cache-buster — but confirm the document itself actually reflects the change
+# before claiming the site is fixed.
+$raw = 'https://raw.githubusercontent.com/nick0410/omextv/main/runtime-config.json'
+$published = $false
+foreach ($i in 1..10) {
+  Start-Sleep -Seconds 3
+  try {
+    $doc = Invoke-RestMethod "${raw}?t=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())" -TimeoutSec 15
+    if ($doc.apiUrl -eq $url) { $published = $true; break }
+  } catch { }
+}
+if ($published) {
+  Write-Host 'The published config now points at this tunnel.' -ForegroundColor Green
+} else {
+  Write-Warning 'The published config has not caught up yet. Give it a minute and reload.'
 }
 
 Write-Host ''
