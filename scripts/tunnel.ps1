@@ -58,11 +58,11 @@ Write-Host "Tunnel: $url"
 # Confirm it actually serves before rebuilding against it.
 #
 # This is a warning, not a gate. A brand-new hostname takes a moment to
-# propagate, and some resolvers hand back only an unroutable AAAA record for
-# trycloudflare.com — in both cases the tunnel is fine for everyone else while
-# being unreachable from here. Aborting on that used to leave the deployed
-# site pointing at the *previous*, genuinely dead tunnel, which is far worse
-# than deploying one this machine merely cannot see.
+# propagate, and this machine's resolver returns NXDOMAIN for trycloudflare
+# names that 1.1.1.1 resolves fine — in both cases the tunnel is serving
+# everyone else while being unreachable from here. Aborting on that used to
+# leave the deployed site pointing at the *previous*, genuinely dead tunnel,
+# which is far worse than deploying one this machine merely cannot see.
 $ok = $false
 foreach ($i in 1..20) {
   try {

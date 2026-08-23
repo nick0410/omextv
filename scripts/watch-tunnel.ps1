@@ -57,10 +57,11 @@ function Get-TunnelUrl {
 
 # Ask a public resolver and connect to that address directly.
 #
-# This machine's resolver answers fresh trycloudflare names with an unroutable
-# AAAA and no A record, so a plain request fails here while the tunnel is
-# serving everyone else perfectly well. Restarting on that would replace a
-# working tunnel every two minutes forever.
+# This machine's resolver answers fresh trycloudflare names with NXDOMAIN,
+# while 1.1.1.1 has both A and AAAA records for the same name. So a plain
+# request fails here while the tunnel is serving everyone else perfectly well,
+# and restarting on that would replace a working tunnel every two minutes
+# forever.
 function Test-Serving($url) {
   try {
     $name = ([Uri]$url).Host

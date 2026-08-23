@@ -57,10 +57,13 @@ if (-not $url) {
   Write-Host '  DOWN  tunnel                 no hostname in the log' -ForegroundColor Red
   $bad++
 } else {
-  # This machine's resolver hands back an unroutable AAAA for fresh
-  # trycloudflare names, so ask a public resolver for the A record and go
-  # straight to it. Failing here means the tunnel is genuinely dead, not that
-  # DNS is being unhelpful.
+  # Ask a public resolver and connect to that address directly.
+  #
+  # This machine's resolver answers fresh trycloudflare names with NXDOMAIN —
+  # "does not exist" — while 1.1.1.1 has both A and AAAA records for the same
+  # name, measured minutes apart. So a plain request fails here while the
+  # tunnel serves everyone else perfectly well, and failing this probe has to
+  # mean the tunnel is dead rather than that DNS is being unhelpful.
   Probe 'tunnel' {
     $host_ = ([Uri]$url).Host
     $a = Resolve-DnsName -Name $host_ -Type A -Server 1.1.1.1 -ErrorAction Stop |
