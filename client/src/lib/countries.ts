@@ -36,7 +36,10 @@ export const COUNTRY_CODES: readonly string[] = [
 
 const displayNames =
   typeof Intl !== "undefined" && "DisplayNames" in Intl
-    ? new Intl.DisplayNames(["en"], { type: "region" })
+    ? // `fallback: "code"` makes an unrecognised code come back as itself.
+      // Without it Intl returns the string "Unknown Region", which tells the
+      // user nothing and looks like a bug in the list rather than an odd code.
+      new Intl.DisplayNames(["en"], { type: "region", fallback: "code" })
     : null;
 
 const nameCache = new Map<string, string>();

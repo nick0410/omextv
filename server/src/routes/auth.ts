@@ -3,11 +3,12 @@ import { prisma } from "../config/database";
 import { hashPassword, comparePassword, generateToken } from "../utils/auth";
 import { registerSchema, loginSchema } from "../utils/validation";
 import { authenticate } from "../middleware/auth";
+import { loginLimiter, registerLimiter } from "../middleware/rateLimit";
 
 const router = Router();
 
 // POST /api/auth/register
-router.post("/register", async (req: Request, res: Response) => {
+router.post("/register", registerLimiter, async (req: Request, res: Response) => {
   try {
     const parsed = registerSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -53,7 +54,7 @@ router.post("/register", async (req: Request, res: Response) => {
 });
 
 // POST /api/auth/login
-router.post("/login", async (req: Request, res: Response) => {
+router.post("/login", loginLimiter, async (req: Request, res: Response) => {
   try {
     const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) {

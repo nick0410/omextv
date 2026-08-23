@@ -1,6 +1,7 @@
 import express from "express";
 import http from "http";
 import cors from "cors";
+import helmet from "helmet";
 import cookieParser from "cookie-parser";
 import path from "path";
 
@@ -10,6 +11,7 @@ import { setupSocket, getOnlineCount, getStats, shutdownSocket } from "./service
 import { genderService, createGenderProvider } from "./services/gender/service";
 import { initStores, closeStores, stores } from "./services/store";
 import { warnIfNoTurn } from "./services/turn";
+import { apiLimiter } from "./middleware/rateLimit";
 
 import authRoutes from "./routes/auth";
 import userRoutes from "./routes/user";
@@ -22,6 +24,25 @@ const app = express();
 const server = http.createServer(app);
 
 app.set("trust proxy", 1);
+
+/*
+ * Security headers.
+ *
+ * `contentSecurityPolicy` is off because this process also serves the built
+ * client in single-host deployments, and a default CSP breaks Vite's inline
+ * module preload. `crossOriginResourcePolicy` is relaxed for the same reason
+ * the CORS list exists: the frontend is served from a different origin.
+ *
+ * Express also advertises itself in every response by default, which tells an
+ * attacker which CVE list to start from for no benefit to anyone.
+ */
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+  }),
+);
+app.disable("x-powered-by");
 
 app.use(
   cors({
@@ -54,6 +75,10 @@ app.get("/api/online", async (_req, res) => {
 app.get("/api/stats", async (_req, res) => {
   res.json(await getStats());
 });
+
+// Applied to /api only: /health has to stay answerable for the deploy scripts,
+// and the static client below should not be throttled.
+app.use("/api", apiLimiter);
 
 app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);

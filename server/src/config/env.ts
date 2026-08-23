@@ -167,6 +167,25 @@ export const env = {
   MESSAGES_PER_MIN: int("MESSAGES_PER_MIN", 60),
   SIGNALS_PER_MIN: int("SIGNALS_PER_MIN", 600),
   MAX_MESSAGE_LENGTH: int("MAX_MESSAGE_LENGTH", 1000),
+  /**
+   * Failed sign-ins allowed per IP per window before throttling.
+   *
+   * Deliberately small: password guessing is the attack this stops, and a
+   * person who has genuinely forgotten their password does not need dozens of
+   * tries a minute. Successful sign-ins are not counted against it.
+   */
+  LOGIN_ATTEMPTS_PER_15MIN: int("LOGIN_ATTEMPTS_PER_15MIN", 10),
+  /**
+   * New accounts allowed per IP per hour.
+   *
+   * Higher than it first looks like it should be, because mobile carriers and
+   * campus networks put thousands of people behind one address — a tight limit
+   * there locks out a whole college to stop one script.
+   */
+  SIGNUPS_PER_HOUR: int("SIGNUPS_PER_HOUR", 20),
+  /** Ceiling on all other API calls per IP per minute. */
+  API_REQUESTS_PER_MIN: int("API_REQUESTS_PER_MIN", 300),
+
   /** Reports needed before an automatic temporary ban. 0 disables. */
   AUTO_BAN_REPORT_THRESHOLD: int("AUTO_BAN_REPORT_THRESHOLD", 5),
   AUTO_BAN_HOURS: int("AUTO_BAN_HOURS", 24),
