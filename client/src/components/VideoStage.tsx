@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { CallPhase, PartnerProfile } from "../lib/types";
+import { countryFlag, countryName } from "../lib/countries";
 
 interface Props {
   localStream: MediaStream | null;
@@ -12,11 +13,45 @@ interface Props {
 }
 
 /** Name plate in the corner of a tile, as in the reference layout. */
+function Plate({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="absolute bottom-4 left-4 max-w-[calc(100%-2rem)] rounded-xl bg-black/55 px-3 py-1.5 backdrop-blur-sm">
+      {children}
+    </div>
+  );
+}
+
 function NamePlate({ label }: { label: string }) {
   return (
-    <div className="absolute bottom-4 left-4 rounded-xl bg-black/55 px-3 py-1.5 backdrop-blur-sm">
-      <span className="text-[15px] font-medium leading-none text-white">{label}</span>
-    </div>
+    <Plate>
+      <span className="block truncate text-[15px] font-medium leading-none text-white">
+        {label}
+      </span>
+    </Plate>
+  );
+}
+
+function PartnerPlate({ partner }: { partner: PartnerProfile }) {
+  // Where the other person is is the whole point of a country filter — the
+  // server has always sent it, it just was not being shown.
+  const place = [partner.city, partner.country ? countryName(partner.country) : null]
+    .filter(Boolean)
+    .join(", ");
+
+  return (
+    <Plate>
+      <span className="block truncate text-[15px] font-medium leading-tight text-white">
+        {partner.username}
+      </span>
+      {place && (
+        <span className="mt-0.5 flex items-center gap-1.5 text-[13px] leading-tight text-white/75">
+          {partner.country && (
+            <span aria-hidden="true">{countryFlag(partner.country)}</span>
+          )}
+          <span className="truncate">{place}</span>
+        </span>
+      )}
+    </Plate>
   );
 }
 
@@ -139,7 +174,7 @@ export function VideoStage({
             <RemotePlaceholder phase={phase} queuePosition={queuePosition} />
           </div>
         )}
-        {partner && showRemote && <NamePlate label={partner.username} />}
+        {partner && showRemote && <PartnerPlate partner={partner} />}
       </Tile>
 
       <Tile>

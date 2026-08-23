@@ -4,7 +4,7 @@ import { COUNTRY_CODES } from "../config/countries";
 import { authenticate } from "../middleware/auth";
 import { genderService } from "../services/gender/service";
 import { genderVerifySchema } from "../utils/validation";
-import { presence } from "../services/presence";
+import { stores } from "../services/store";
 
 const router = Router();
 
@@ -21,7 +21,10 @@ router.get("/countries", (_req: Request, res: Response) => {
  */
 router.get("/countries/online", async (_req: Request, res: Response) => {
   try {
-    const ids = presence.onlineUserIds();
+    // Must read the same store the socket layer writes to. This used to read a
+    // legacy in-process singleton that nothing populates any more, so every
+    // country reported zero online and the "nobody is there" hint never fired.
+    const ids = await stores().presence.onlineUserIds();
     if (ids.length === 0) {
       res.json({ countries: [] });
       return;

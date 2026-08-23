@@ -101,4 +101,11 @@ export class PresenceRegistry {
   }
 }
 
-export const presence = new PresenceRegistry();
+/*
+ * There is deliberately no shared singleton here.
+ *
+ * One used to be exported, and a route kept reading it long after the socket
+ * layer had moved to the store — so it reported an empty world while real
+ * users were connected. Reach presence through `stores().presence`, which is
+ * the thing that actually gets written to.
+ */

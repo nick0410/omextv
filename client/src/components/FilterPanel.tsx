@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import api from "../lib/axios";
 import { CountryPicker } from "./CountryPicker";
-import { countryFlag, countryName } from "../lib/countries";
+import { COUNTRY_CODES, countryFlag, countryName } from "../lib/countries";
 import type { GenderPreference, MatchFilters } from "../lib/types";
 
 interface Props {
@@ -19,15 +19,25 @@ const GENDERS: { value: GenderPreference; label: string }[] = [
 ];
 
 export function FilterPanel({ filters, onChange, disabled, suggested }: Props) {
-  const [codes, setCodes] = useState<string[]>([]);
+  // Seeded from the bundled list so the picker is usable immediately and stays
+  // usable if the API is unreachable.
+  const [codes, setCodes] = useState<readonly string[]>(COUNTRY_CODES);
   const [online, setOnline] = useState<Record<string, number>>({});
   const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
     api
       .get<{ countries: string[] }>("/meta/countries")
-      .then((res) => setCodes(Array.isArray(res.data?.countries) ? res.data.countries : []))
-      .catch(() => setCodes([]));
+      .then((res) => {
+        // Only replace the bundled list with a real one. An empty or malformed
+        // response must not blank out a picker that already works.
+        if (Array.isArray(res.data?.countries) && res.data.countries.length > 0) {
+          setCodes(res.data.countries);
+        }
+      })
+      .catch(() => {
+        /* Keep the bundled list. */
+      });
   }, []);
 
   // Which countries have someone online, so a filter that guarantees an empty

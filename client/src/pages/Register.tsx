@@ -4,7 +4,7 @@ import api from "../lib/axios";
 import { useAuthStore } from "../store/authStore";
 import { Logo } from "../components/Logo";
 import { CountryPicker } from "../components/CountryPicker";
-import { countryFlag, countryName } from "../lib/countries";
+import { COUNTRY_CODES, countryFlag, countryName } from "../lib/countries";
 import type { Gender } from "../lib/types";
 
 const GENDERS: { value: Gender; label: string }[] = [
@@ -31,14 +31,21 @@ export default function Register() {
     gender: "female" as Gender,
     country: "",
   });
-  const [countries, setCountries] = useState<string[]>([]);
+  const [countries, setCountries] = useState<readonly string[]>(COUNTRY_CODES);
   const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
     api
       .get<{ countries: string[] }>("/meta/countries")
-      .then((res) => setCountries(Array.isArray(res.data?.countries) ? res.data.countries : []))
-      .catch(() => setCountries([]));
+      .then((res) => {
+        if (Array.isArray(res.data?.countries) && res.data.countries.length > 0) {
+          setCountries(res.data.countries);
+        }
+      })
+      .catch(() => {
+        /* Keep the bundled list — registration must not be blocked by a
+           country list the client already knows. */
+      });
   }, []);
 
   if (token) return <Navigate to="/chat" replace />;

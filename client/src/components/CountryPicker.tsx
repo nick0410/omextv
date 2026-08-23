@@ -118,14 +118,20 @@ function PickerPanel({
   );
 
   const selectedSet = new Set(selected);
-  const atLimit = selected.length >= maxSelected;
+  const single = maxSelected === 1;
+  // With a single-choice picker every other row would otherwise grey out the
+  // moment one is chosen, so changing your mind meant un-picking first. Picking
+  // another simply replaces it instead.
+  const atLimit = !single && selected.length >= maxSelected;
 
   const toggle = (code: string) => {
-    onChange(
-      selectedSet.has(code)
-        ? selected.filter((c) => c !== code)
-        : [...selected, code].slice(0, maxSelected),
-    );
+    if (selectedSet.has(code)) {
+      onChange(selected.filter((c) => c !== code));
+      return;
+    }
+    // `slice(0, max)` kept the *old* entries and silently discarded the new
+    // one, so a replacement looked like a click that did nothing.
+    onChange(single ? [code] : [...selected, code].slice(0, maxSelected));
   };
 
   return (
@@ -167,8 +173,12 @@ function PickerPanel({
 
           <p className="mt-2 text-xs text-ink-500">
             {selected.length === 0
-              ? "Anywhere"
-              : `${selected.length} of ${maxSelected} selected`}
+              ? single
+                ? "None selected"
+                : "Anywhere"
+              : single
+                ? "1 selected"
+                : `${selected.length} of ${maxSelected} selected`}
           </p>
         </div>
 

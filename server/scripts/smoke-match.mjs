@@ -21,7 +21,7 @@ const check = (label, ok, detail = "") => {
   console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}${detail ? ` — ${detail}` : ""}`);
 };
 
-async function register(suffix, gender) {
+async function register(suffix, gender, country = "IN") {
   const username = `sm${stamp}${suffix}`;
   const res = await fetch(`${BASE}/api/auth/register`, {
     method: "POST",
@@ -31,7 +31,7 @@ async function register(suffix, gender) {
       password: "smoketest1234",
       username,
       gender,
-      country: "IN",
+      country,
     }),
   });
   if (!res.ok) throw new Error(`register ${suffix}: HTTP ${res.status}`);
@@ -73,8 +73,10 @@ async function main() {
   check("gender model loaded", stats.genderReady === true, `provider=${stats.genderProvider}`);
 
   console.log("\n  --- two clients ---");
-  const alice = await register("a", "female");
-  const bob = await register("b", "male");
+  // Deliberately different countries: the partner's location is shown in the
+  // UI and filtered on, so it has to survive the trip through the queue.
+  const alice = await register("a", "female", "IN");
+  const bob = await register("b", "male", "DE");
   check("registration", Boolean(alice.token && bob.token));
 
   const sa = await connect(alice.token);
@@ -94,6 +96,22 @@ async function main() {
   check("exactly one initiator", ra.isInitiator !== rb.isInitiator);
   check("partner identity correct", ra.partner.userId === bob.id && rb.partner.userId === alice.id);
   check("no email leaked", !JSON.stringify(ra).includes("@smoke.local"));
+  check(
+    "partner country reaches the client",
+    ra.partner.country === "DE" && rb.partner.country === "IN",
+    `saw ${ra.partner.country}/${rb.partner.country}`,
+  );
+
+  const online = await fetch(`${BASE}/api/meta/countries/online`).then((r) => r.json());
+  const seen = new Set((online.countries ?? []).map((c) => c.country));
+  check(
+    "online countries reports both",
+    seen.has("IN") && seen.has("DE"),
+    `saw ${[...seen].join(",") || "nothing"}`,
+  );
+
+  const list = await fetch(`${BASE}/api/meta/countries`).then((r) => r.json());
+  check("country list is complete", (list.countries ?? []).length === 249);
 
   // Signalling relay.
   const offerAtB = once(sb, "offer");
