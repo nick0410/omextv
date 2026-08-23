@@ -6,6 +6,8 @@ import { VideoStage } from "../components/VideoStage";
 import { ControlBar } from "../components/ControlBar";
 import { ChatPanel } from "../components/ChatPanel";
 import { FilterPanel } from "../components/FilterPanel";
+import { ActiveFilters } from "../components/ActiveFilters";
+import { useOnlineCountries } from "../hooks/useOnlineCountries";
 import { ReportModal } from "../components/ReportModal";
 import { Logo } from "../components/Logo";
 import { useGenderDetect } from "../hooks/useGenderDetect";
@@ -110,6 +112,7 @@ export default function Chat() {
     void startCamera();
   }, [startCamera]);
 
+  const onlineCountries = useOnlineCountries();
   const isLive = state.phase === "live";
 
 
@@ -194,6 +197,17 @@ export default function Chat() {
             selfName={user?.username ?? "You"}
             isCameraOff={state.isCameraOff}
             queuePosition={state.queuePosition}
+          />
+
+          <ActiveFilters
+            filters={filters}
+            online={onlineCountries}
+            queued={state.phase === "queued"}
+            onClearAll={() => {
+              // Also stop the detected-gender default from re-applying itself.
+              setSuggestionApplied(true);
+              setFilters({ gender: "any", countries: [], city: null });
+            }}
           />
 
           <ControlBar

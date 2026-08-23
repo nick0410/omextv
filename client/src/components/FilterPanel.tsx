@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import api from "../lib/axios";
 import { CountryPicker } from "./CountryPicker";
 import { COUNTRY_CODES, countryFlag, countryName } from "../lib/countries";
+import { useOnlineCountries } from "../hooks/useOnlineCountries";
 import type { GenderPreference, MatchFilters } from "../lib/types";
 
 interface Props {
@@ -22,8 +23,10 @@ export function FilterPanel({ filters, onChange, disabled, suggested }: Props) {
   // Seeded from the bundled list so the picker is usable immediately and stays
   // usable if the API is unreachable.
   const [codes, setCodes] = useState<readonly string[]>(COUNTRY_CODES);
-  const [online, setOnline] = useState<Record<string, number>>({});
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Which countries have someone online, so a filter that guarantees an empty
+  // queue is visible as such rather than silently never matching.
+  const online = useOnlineCountries();
 
   useEffect(() => {
     api
@@ -38,24 +41,6 @@ export function FilterPanel({ filters, onChange, disabled, suggested }: Props) {
       .catch(() => {
         /* Keep the bundled list. */
       });
-  }, []);
-
-  // Which countries have someone online, so a filter that guarantees an empty
-  // queue is visible as such rather than silently never matching.
-  useEffect(() => {
-    const load = () =>
-      api
-        .get<{ countries: { country: string; online: number }[] }>("/meta/countries/online")
-        .then((res) => {
-          const rows = Array.isArray(res.data?.countries) ? res.data.countries : [];
-          const map: Record<string, number> = {};
-          for (const row of rows) map[row.country] = row.online;
-          setOnline(map);
-        })
-        .catch(() => setOnline({}));
-    load();
-    const timer = setInterval(load, 15_000);
-    return () => clearInterval(timer);
   }, []);
 
   const setCountries = (next: string[]) => {
