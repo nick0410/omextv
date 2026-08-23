@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useCall } from "../hooks/useCall";
 import { useAuthStore } from "../store/authStore";
@@ -59,6 +60,7 @@ export default function Chat() {
   const logout = useAuthStore((s) => s.logout);
   const [filters, setFilters] = useState<MatchFilters>(loadFilters);
   const [showReport, setShowReport] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [tab, setTab] = useState<"chat" | "filters">("chat");
   // Applied at most once, so a deliberate choice is never overwritten.
   const [suggestionApplied, setSuggestionApplied] = useState(false);
@@ -120,7 +122,7 @@ export default function Chat() {
   ] as const;
 
   return (
-    <div className="flex min-h-dvh flex-col">
+    <div className="flex h-dvh flex-col overflow-hidden lg:min-h-dvh lg:h-auto lg:overflow-visible">
       <h1 className="sr-only">Omextv video chat</h1>
       <header className="border-b border-ink-200/70 bg-white/80 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-[1400px] items-center justify-between px-5">
@@ -160,8 +162,17 @@ export default function Chat() {
 
       {state.error && (
         <div className="border-b border-danger-500/20 bg-danger-500/5">
-          <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-4 px-5 py-2">
-            <p className="text-sm text-danger-600">{state.error}</p>
+          <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-3 px-3 py-2 lg:px-5">
+            <p className="min-w-0 text-sm text-danger-600">
+              {state.error}{" "}
+              {/* The moment someone needs this is the moment a call failed. */}
+              <Link
+                to="/diagnostics"
+                className="whitespace-nowrap font-medium underline underline-offset-2"
+              >
+                Test my connection
+              </Link>
+            </p>
             <button
               onClick={clearError}
               aria-label="Dismiss"
@@ -173,8 +184,8 @@ export default function Chat() {
         </div>
       )}
 
-      <main className="mx-auto grid w-full max-w-[1400px] flex-1 gap-6 px-5 py-6 lg:grid-cols-[1fr_340px]">
-        <div className="flex min-h-0 flex-col gap-6">
+      <main className="mx-auto flex w-full min-h-0 max-w-[1400px] flex-1 flex-col gap-3 px-3 pb-3 pt-3 lg:grid lg:grid-cols-[1fr_340px] lg:gap-6 lg:px-5 lg:py-6">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 lg:gap-6">
           <VideoStage
             localStream={localStream}
             remoteStream={remoteStream}
@@ -199,7 +210,36 @@ export default function Chat() {
           />
         </div>
 
-        <aside className="flex min-h-[520px] flex-col gap-4">
+        {/* A sheet on a phone, a column on a laptop. Inline on mobile it pushed
+            the controls below the fold and made the page scroll during a call. */}
+        <button
+          type="button"
+          onClick={() => setSheetOpen(true)}
+          className="min-h-11 rounded-xl bg-white px-4 text-sm font-medium text-ink-700 ring-1 ring-ink-200 lg:hidden"
+        >
+          Chat and filters
+        </button>
+
+        {sheetOpen && (
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={() => setSheetOpen(false)}
+            className="fixed inset-0 z-40 bg-ink-900/40 backdrop-blur-sm lg:hidden"
+          />
+        )}
+
+        <aside
+          className={`z-50 flex flex-col gap-4 max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:h-[72dvh] max-lg:rounded-t-2xl max-lg:bg-ink-50 max-lg:p-3 max-lg:pb-[max(0.75rem,env(safe-area-inset-bottom))] max-lg:shadow-[0_-8px_40px_rgba(15,23,42,0.18)] max-lg:transition-transform lg:min-h-[520px] ${
+            sheetOpen ? "max-lg:translate-y-0" : "max-lg:translate-y-full"
+          }`}
+        >
+          <button
+            type="button"
+            onClick={() => setSheetOpen(false)}
+            aria-label="Close"
+            className="mx-auto h-1.5 w-10 shrink-0 rounded-full bg-ink-300 lg:hidden"
+          />
           <div
             role="tablist"
             className="flex gap-1 rounded-xl bg-white p-1 ring-1 ring-ink-200"

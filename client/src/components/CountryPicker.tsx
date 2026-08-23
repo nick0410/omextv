@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   buildOptions,
   matchesQuery,
@@ -50,7 +51,7 @@ function Row({
       aria-selected={checked}
       disabled={disabled && !checked}
       onClick={onToggle}
-      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+      className={`flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
         checked ? "bg-brand-50" : "hover:bg-ink-100"
       }`}
     >
@@ -82,7 +83,16 @@ export function CountryPicker({ open, ...rest }: Props) {
   // Mount only while open, so the panel's own state (the search query) resets
   // naturally instead of being cleared by an effect on every toggle.
   if (!open) return null;
-  return <PickerPanel {...rest} />;
+
+  /*
+   * Rendered into <body>, not in place.
+   *
+   * On a phone this picker opens from inside the sliding chat sheet, and a
+   * transformed ancestor becomes the containing block for `position: fixed` —
+   * so `inset-0` covered only the sheet instead of the screen, leaving the
+   * list squeezed into the bottom of the display.
+   */
+  return createPortal(<PickerPanel {...rest} />, document.body);
 }
 
 function PickerPanel({
@@ -146,7 +156,7 @@ function PickerPanel({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="flex max-h-[80vh] w-full max-w-[440px] flex-col overflow-hidden rounded-2xl bg-white shadow-[0_8px_40px_rgba(15,23,42,0.16)]">
+      <div className="flex max-h-[85dvh] w-full max-w-[440px] flex-col overflow-hidden rounded-2xl bg-white shadow-[0_8px_40px_rgba(15,23,42,0.16)]">
         <div className="border-b border-ink-200 p-4">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-base font-semibold tracking-tight text-ink-900">

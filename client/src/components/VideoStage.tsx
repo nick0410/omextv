@@ -55,21 +55,36 @@ function PartnerPlate({ partner }: { partner: PartnerProfile }) {
   );
 }
 
-function Tile({
-  children,
-  className = "",
-}: {
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <div
-      className={`relative aspect-video max-h-[38vh] w-full overflow-hidden lg:max-h-[62vh] rounded-2xl bg-ink-900 shadow-[0_1px_3px_rgba(15,23,42,0.08),0_8px_24px_rgba(15,23,42,0.06)] ${className}`}
-    >
-      {children}
-    </div>
-  );
-}
+// Deliberately carries no `position`. Listing `relative` here and `absolute`
+// on a tile does not override it — CSS resolves by stylesheet order, not by
+// the order classes appear in the attribute, so the base class won and the
+// picture-in-picture tile silently stayed in the flow.
+const TILE_SHELL =
+  "overflow-hidden bg-ink-900 " +
+  "shadow-[0_1px_3px_rgba(15,23,42,0.08),0_8px_24px_rgba(15,23,42,0.06)]";
+
+/*
+ * On a phone the other person fills the screen and you sit in a corner, the
+ * way every video call app does it. Two stacked 38vh tiles meant the person
+ * you were talking to was tiny and the controls were below the fold.
+ *
+ * The laptop layout is unchanged: two equal tiles side by side.
+ *
+ * Both breakpoints share one pair of <video> elements. Rendering a separate
+ * mobile tree would mean two decoders for the same stream, which phones
+ * handle badly.
+ */
+const REMOTE_TILE =
+  `${TILE_SHELL} relative h-full w-full rounded-2xl ` +
+  "lg:aspect-video lg:h-auto lg:max-h-[62vh]";
+
+const LOCAL_TILE =
+  `${TILE_SHELL} absolute right-3 top-3 z-20 w-[28vw] max-w-[132px] ` +
+  "aspect-[3/4] rounded-xl ring-1 ring-white/15 " +
+  // lg:relative, not lg:static — the tile has to stay a positioning context or
+  // the name plate inside it escapes and lands somewhere else on the page.
+  "lg:relative lg:inset-auto lg:aspect-video lg:w-full lg:max-w-none " +
+  "lg:rounded-2xl lg:ring-0 lg:max-h-[62vh]";
 
 function RemotePlaceholder({
   phase,
@@ -159,8 +174,8 @@ export function VideoStage({
 
   return (
     // Side by side on a laptop; the reference stacks them because it is a phone.
-    <div className="grid flex-1 content-center gap-4 lg:grid-cols-2">
-      <Tile>
+    <div className="relative flex min-h-0 flex-1 lg:grid lg:content-center lg:gap-4 lg:grid-cols-2">
+      <div className={REMOTE_TILE}>
         <video
           ref={remoteRef}
           autoPlay
@@ -175,9 +190,9 @@ export function VideoStage({
           </div>
         )}
         {partner && showRemote && <PartnerPlate partner={partner} />}
-      </Tile>
+      </div>
 
-      <Tile>
+      <div className={LOCAL_TILE}>
         <video
           ref={localRef}
           autoPlay
@@ -205,8 +220,11 @@ export function VideoStage({
             </svg>
           </div>
         )}
-        <NamePlate label={selfName} />
-      </Tile>
+        {/* Your own name is noise in a thumbnail you are already looking at. */}
+        <div className="hidden lg:block">
+          <NamePlate label={selfName} />
+        </div>
+      </div>
     </div>
   );
 }

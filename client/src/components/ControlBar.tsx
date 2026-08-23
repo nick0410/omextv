@@ -39,23 +39,23 @@ function Control({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex w-20 flex-col items-center">
+    <div className="flex w-14 flex-col items-center sm:w-20">
       {/* Fixed-height slot so a large button does not push its label out of
           line with the smaller ones beside it. */}
-      <div className="flex h-16 items-center">
+      <div className="flex h-14 items-center sm:h-16">
         <button
           type="button"
           onClick={onClick}
           disabled={disabled}
           aria-label={label}
           className={`grid place-items-center rounded-full shadow-[0_2px_8px_rgba(15,23,42,0.12)] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-            large ? "h-16 w-16" : "h-12 w-12"
+            large ? "h-14 w-14 sm:h-16 sm:w-16" : "h-11 w-11 sm:h-12 sm:w-12"
           } ${VARIANTS[variant]}`}
         >
           {children}
         </button>
       </div>
-      <span className="mt-2 text-[13px] font-medium leading-none text-ink-500">
+      <span className="mt-1.5 truncate text-[11px] font-medium leading-none text-ink-500 sm:mt-2 sm:text-[13px]">
         {label}
       </span>
     </div>
@@ -135,7 +135,7 @@ export function ControlBar({
   const queued = phase === "queued";
 
   return (
-    <div className="flex flex-wrap items-start justify-center gap-x-5 gap-y-4">
+    <div className="flex flex-wrap items-start justify-center gap-x-1 gap-y-3 sm:gap-x-5 sm:gap-y-4">
       <Control
         label={isMuted ? "Unmute" : "Mute"}
         variant={isMuted ? "active" : "default"}
