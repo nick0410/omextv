@@ -1,0 +1,6 @@
+{
+  "_comment": "Where the live API is. Rewritten by scripts/tunnel.ps1 each time the tunnel restarts; the deployed client reads it at boot so a new tunnel needs no rebuild.",
+  "updatedAt": "2026-08-23T11:55:21Z",
+  "apiUrl": "https://likelihood-roberts-attending-frequent.trycloudflare.com",
+  "socketUrl": "https://likelihood-roberts-attending-frequent.trycloudflare.com"
+}
