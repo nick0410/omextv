@@ -1,6 +1,6 @@
-﻿{
+{
     "_comment":  "Where the live API is. Rewritten by scripts/tunnel.ps1; the deployed client reads it at boot so a new tunnel needs no rebuild.",
-    "updatedAt":  "2026-08-23T19:46:05Z",
-    "apiUrl":  "https://safari-engaging-negotiations-quest.trycloudflare.com",
-    "socketUrl":  "https://safari-engaging-negotiations-quest.trycloudflare.com"
+    "updatedAt":  "2026-08-23T20:37:22Z",
+    "apiUrl":  "https://couple-charge-tracks-successful.trycloudflare.com",
+    "socketUrl":  "https://couple-charge-tracks-successful.trycloudflare.com"
 }
