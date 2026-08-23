@@ -143,10 +143,18 @@ async function loopback(stream: MediaStream): Promise<boolean> {
   }
 }
 
+interface QueueReport {
+  waiting: number;
+  entries: { id: string; country: string | null; gender: string; waitedMs: number }[];
+  pairs: { a: string; b: string; blockedBy: string | null }[];
+}
+
 export default function Diagnostics() {
   const [checks, setChecks] = useState<Check[]>(INITIAL);
   const [running, setRunning] = useState(false);
   const [verdict, setVerdict] = useState<string | null>(null);
+  const [queue, setQueue] = useState<QueueReport | null>(null);
+  const [queueError, setQueueError] = useState<string | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
   const set = useCallback((id: string, state: State, detail: string) => {
@@ -213,6 +221,20 @@ export default function Diagnostics() {
             iceServers = cfg.iceServers;
           }
           hasTurn = Boolean(cfg.hasTurn);
+        }
+
+        // Why the people currently waiting are not being paired. Matchmaking
+        // failures are otherwise silent — the queue just never produces a
+        // match — and the cause is nearly always a filter someone forgot.
+        try {
+          const q = await fetch(`${base}/api/meta/queue-report`, {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: AbortSignal.timeout(12000),
+          });
+          if (q.ok) setQueue(await q.json());
+          else setQueueError(`HTTP ${q.status}`);
+        } catch {
+          setQueueError("Could not read the queue");
         }
       }
     } catch (err) {
@@ -345,6 +367,46 @@ export default function Diagnostics() {
 
           {verdict && (
             <p className="mt-5 rounded-xl bg-ink-100 p-3.5 text-sm text-ink-700">{verdict}</p>
+          )}
+
+          {(queue || queueError) && (
+            <div className="mt-5 border-t border-ink-200 pt-4">
+              <h2 className="text-sm font-semibold text-ink-900">Who is waiting</h2>
+
+              {queueError && <p className="mt-1.5 text-sm text-ink-500">{queueError}</p>}
+
+              {queue && queue.waiting === 0 && (
+                <p className="mt-1.5 text-sm text-ink-500">
+                  Nobody is in the queue right now.
+                </p>
+              )}
+
+              {queue && queue.waiting > 0 && (
+                <>
+                  <ul className="mt-2 space-y-1">
+                    {queue.entries.map((e) => (
+                      <li key={e.id} className="text-sm text-ink-600">
+                        {e.id} · {e.gender} · {e.country ?? "no country"} ·{" "}
+                        {Math.round(e.waitedMs / 1000)}s
+                      </li>
+                    ))}
+                  </ul>
+
+                  {queue.pairs.length > 0 && (
+                    <ul className="mt-3 space-y-1.5">
+                      {queue.pairs.map((p) => (
+                        <li
+                          key={`${p.a}-${p.b}`}
+                          className={`text-sm ${p.blockedBy ? "text-amber-700" : "text-emerald-700"}`}
+                        >
+                          {p.a} + {p.b}: {p.blockedBy ?? "compatible — should match"}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              )}
+            </div>
           )}
         </div>
       </div>

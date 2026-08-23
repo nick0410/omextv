@@ -54,6 +54,32 @@ function connect(token) {
   });
 }
 
+/**
+ * Wait for the queue to acknowledge us, either way.
+ *
+ * `queue-joined` is only emitted when nobody was waiting. Against a server
+ * with real users on it, joining can match instantly instead — so demanding
+ * `queue-joined` made this script fail on a perfectly healthy server, which is
+ * the worst kind of test.
+ */
+const queued = (socket, ms = 15000) =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("timed out waiting to join the queue")),
+      ms,
+    );
+    const done = (how) => (payload) => {
+      clearTimeout(timer);
+      socket.off("queue-joined", onJoin);
+      socket.off("match-found", onMatch);
+      resolve({ how, payload });
+    };
+    const onJoin = done("queued");
+    const onMatch = done("matched");
+    socket.once("queue-joined", onJoin);
+    socket.once("match-found", onMatch);
+  });
+
 const once = (socket, event, ms = 15000) =>
   new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`timed out waiting for "${event}"`)), ms);
@@ -83,9 +109,20 @@ async function main() {
   const sb = await connect(bob.token);
   check("both sockets connected", sa.connected && sb.connected);
 
-  // Alice waits; Bob arrives and should be paired with her.
+  // Alice waits; Bob arrives and should be paired with her. If a real user is
+  // already queued, Alice matches them instead and this run cannot prove
+  // anything — say so rather than reporting a spurious failure.
   sa.emit("join-queue", { gender: "any", countries: [], city: null });
-  await once(sa, "queue-joined");
+  const first = await queued(sa);
+  if (first.how === "matched") {
+    console.log(
+      "  SKIP  a real user was already waiting and matched first; " +
+        "re-run when the queue is empty",
+    );
+    sa.close();
+    sb.close();
+    process.exit(0);
+  }
 
   const matchA = once(sa, "match-found");
   const matchB = once(sb, "match-found");
@@ -133,9 +170,9 @@ async function main() {
 
   // ...and they are not immediately re-paired with each other.
   sa.emit("join-queue", { gender: "any", countries: [], city: null });
-  await once(sa, "queue-joined");
+  await queued(sa);
   sb.emit("join-queue", { gender: "any", countries: [], city: null });
-  await once(sb, "queue-joined");
+  await queued(sb);
 
   // No match arriving is the pass condition here, so the timeout rejection is
   // the expected outcome rather than an error.

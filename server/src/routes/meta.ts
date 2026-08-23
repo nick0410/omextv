@@ -5,6 +5,8 @@ import { authenticate } from "../middleware/auth";
 import { genderService } from "../services/gender/service";
 import { genderVerifySchema } from "../utils/validation";
 import { stores } from "../services/store";
+import { explainIncompatibility, stageFor } from "../services/matchmaking/engine";
+import crypto from "crypto";
 
 const router = Router();
 
@@ -44,6 +46,60 @@ router.get("/countries/online", async (_req: Request, res: Response) => {
     });
   } catch (err) {
     console.error("Online countries error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * GET /api/meta/queue-report
+ *
+ * Why the people currently waiting are not being paired.
+ *
+ * Matchmaking failures are silent by design — the queue simply does not
+ * produce a match — and the cause is nearly always a filter, enforced in both
+ * directions, that one of the two people forgot they set. Without this, the
+ * only way to find out was to guess.
+ *
+ * Authenticated, and identifies people only by a short hash of their id: the
+ * point is to explain the rules, not to publish who is looking for whom.
+ */
+router.get("/queue-report", authenticate, async (_req: Request, res: Response) => {
+  try {
+    const now = Date.now();
+    const { premium, standard } = await stores().queue.snapshot();
+    const all = [...premium, ...standard];
+
+    const short = (id: string) =>
+      crypto.createHash("sha256").update(id).digest("hex").slice(0, 6);
+
+    const entries = all.map((e) => ({
+      id: short(e.userId),
+      country: e.country,
+      city: e.city,
+      gender: e.effectiveGender,
+      filters: e.filters,
+      waitedMs: now - e.joinedAt,
+      stage: stageFor(now - e.joinedAt),
+    }));
+
+    const pairs: { a: string; b: string; blockedBy: string | null }[] = [];
+    for (let i = 0; i < all.length; i++) {
+      for (let j = i + 1; j < all.length; j++) {
+        const stage = Math.max(
+          stageFor(now - all[i].joinedAt),
+          stageFor(now - all[j].joinedAt),
+        );
+        pairs.push({
+          a: short(all[i].userId),
+          b: short(all[j].userId),
+          blockedBy: explainIncompatibility(all[i], all[j], stage, now),
+        });
+      }
+    }
+
+    res.json({ waiting: entries.length, entries, pairs });
+  } catch (err) {
+    console.error("Queue report error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });

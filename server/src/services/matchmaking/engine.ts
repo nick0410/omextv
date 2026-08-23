@@ -62,6 +62,76 @@ export function filtersAccept(
  * Full two-way compatibility. `now` is passed in rather than read from the
  * clock so tests can drive time deterministically.
  */
+/**
+ * Say, in words, why two waiting people are not being paired.
+ *
+ * `isCompatible` returns a bare boolean, which is the right shape for the
+ * matchmaker and useless for anyone asking "why has nobody matched me for two
+ * minutes". The rules that block a pair are almost always filters the user
+ * forgot they set, and they are enforced in *both* directions — so the reason
+ * is frequently the other person's filter, which no amount of staring at your
+ * own settings will reveal.
+ *
+ * Returns null when the pair is compatible.
+ */
+export function explainIncompatibility(
+  a: QueueEntry,
+  b: QueueEntry,
+  stage: number,
+  now: number,
+): string | null {
+  if (a.userId === b.userId) return "same user";
+
+  if (a.blockedIds.has(b.userId)) return "A has blocked B";
+  if (b.blockedIds.has(a.userId)) return "B has blocked A";
+
+  const cfg = RELAX_STAGES[Math.min(stage, RELAX_STAGES.length - 1)];
+
+  const oneWay = (
+    from: QueueEntry,
+    to: QueueEntry,
+    fromLabel: string,
+    toLabel: string,
+  ): string | null => {
+    if (!genderAccepts(from.filters.gender, to.effectiveGender)) {
+      return `${fromLabel} is searching for "${from.filters.gender}" but ${toLabel} is ${to.effectiveGender}`;
+    }
+    if (from.filters.countries.length > 0) {
+      if (!to.country) {
+        return `${fromLabel} filters by country but ${toLabel} has no country set`;
+      }
+      if (!from.filters.countries.includes(to.country)) {
+        return `${fromLabel} only wants ${from.filters.countries.join(", ")} but ${toLabel} is in ${to.country}`;
+      }
+    }
+    if (cfg.enforceCity && from.filters.city) {
+      if (!to.city) return `${fromLabel} filters by city but ${toLabel} has no city set`;
+      if (to.city.toLowerCase() !== from.filters.city.toLowerCase()) {
+        return `${fromLabel} only wants ${from.filters.city} but ${toLabel} is in ${to.city}`;
+      }
+    }
+    return null;
+  };
+
+  const aRejects = oneWay(a, b, "A", "B");
+  if (aRejects) return aRejects;
+  const bRejects = oneWay(b, a, "B", "A");
+  if (bRejects) return bRejects;
+
+  if (cfg.recentPartnerWindowMs > 0) {
+    const lastA = a.recentPartners.get(b.userId);
+    if (lastA !== undefined && now - lastA < cfg.recentPartnerWindowMs) {
+      return `they were paired ${Math.round((now - lastA) / 1000)}s ago; the rematch window is ${Math.round(cfg.recentPartnerWindowMs / 1000)}s`;
+    }
+    const lastB = b.recentPartners.get(a.userId);
+    if (lastB !== undefined && now - lastB < cfg.recentPartnerWindowMs) {
+      return `they were paired ${Math.round((now - lastB) / 1000)}s ago; the rematch window is ${Math.round(cfg.recentPartnerWindowMs / 1000)}s`;
+    }
+  }
+
+  return isCompatible(a, b, stage, now) ? null : "blocked by a rule not covered here";
+}
+
 export function isCompatible(
   a: QueueEntry,
   b: QueueEntry,
