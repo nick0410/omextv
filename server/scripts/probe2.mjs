@@ -191,9 +191,28 @@ async function main() {
 
   // All at once, which is where a matchmaker without a lock double-pairs.
   sockets.forEach(join);
-  await new Promise((r) => setTimeout(r, 4000));
 
-  check("everyone got exactly one match", seen.length === 6, `${seen.length} matches`);
+  // Wait for the outcome, not for a fixed number of seconds.
+  //
+  // Pairing a burst is not uniform: the first pair can land inside 200ms while
+  // the last waits on the next sweep, so measured runs finish anywhere between
+  // 300ms and two seconds. A sleep long enough to be safe today is a sleep
+  // that reports a phantom failure the day the machine is busier — and it
+  // reports it as "the matchmaker lost someone", which is a real bug's
+  // signature and costs an hour to disbelieve.
+  const deadline = Date.now() + 15000;
+  while (seen.length < 6 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 200));
+  }
+
+  const missing = crowd
+    .map((u, i) => (seen.some((s) => s.i === i) ? null : u.username))
+    .filter(Boolean);
+  check(
+    "everyone got exactly one match",
+    seen.length === 6,
+    seen.length === 6 ? "" : `${seen.length} matches; no match for ${missing.join(", ")}`,
+  );
   check(
     "every room holds exactly two people",
     [...rooms.values()].every((n) => n === 2),
@@ -201,7 +220,14 @@ async function main() {
   );
   check("nobody was paired with themselves", seen.every((s) => s.partner !== crowd[s.i].id));
 
-  const after = await stats();
+  // Same reason: the counters catch up a moment after the last match-found is
+  // delivered, so read them until they agree or the wait runs out.
+  let after = await stats();
+  const countsDeadline = Date.now() + 5000;
+  while ((after.queued !== 0 || after.activeChats !== 3) && Date.now() < countsDeadline) {
+    await new Promise((r) => setTimeout(r, 200));
+    after = await stats();
+  }
   check("the queue drained", after.queued === 0, `queued=${after.queued}`);
   check("three chats are live", after.activeChats === 3, `chats=${after.activeChats}`);
 

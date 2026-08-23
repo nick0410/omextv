@@ -870,4 +870,40 @@ describe.skipIf(!isDbReady())("stats", () => {
     expect(status.position).toBe(1);
     expect(status.size).toBe(1);
   });
+  /*
+   * The earliest a client can possibly speak.
+   *
+   * Every other test here waits for "connected" before emitting, which quietly
+   * sidesteps the window this covers: the client's own "connect" fires as soon
+   * as the transport is up, while the server is still awaiting Redis inside
+   * its connection handler. The handlers used to be attached only after those
+   * awaits, and socket.io discards an event with no listener — so a join sent
+   * this early vanished. No error reached the client and no entry reached the
+   * queue; the user simply searched forever. It cost about one user in six
+   * when six joined at once.
+   */
+  it("does not lose a join sent the instant the socket connects", async () => {
+    const a = await makeUser();
+
+    const socket = createClient(`http://localhost:${port}`, {
+      auth: { token: a.token },
+      transports: ["websocket"],
+      reconnection: false,
+    });
+    openSockets.push(socket);
+
+    const box = buffered(socket);
+    socket.onAny((event: string, payload: unknown) => {
+      const queue = box.get(event) ?? [];
+      queue.push(payload);
+      box.set(event, queue);
+    });
+
+    // Synchronously, in the same tick the transport opens — no awaiting
+    // "connected" first, which is the whole point.
+    socket.on("connect", () => socket.emit("join-queue", {}));
+
+    await once(socket, "queue-joined");
+    expect((await getStats()).queued).toBe(1);
+  });
 });

@@ -204,14 +204,36 @@ async function onConnection(socket: AuthedSocket): Promise<void> {
   const user = socket.user;
 
   const store = stores();
-  const evictedSocketId = await store.presence.register(user.id, socket.id, env.INSTANCE_ID);
-  if (evictedSocketId) {
-    // Same account opened elsewhere. Close the old socket, but leave any
-    // in-flight pair alone — the new socket adopts it below.
-    const old = io?.sockets.sockets.get(evictedSocketId);
-    old?.emit("session-replaced", { reason: "signed_in_elsewhere" });
-    old?.disconnect(true);
-  }
+
+  /*
+   * Set presence up, but attach the handlers before waiting for it.
+   *
+   * A client's "connect" fires the moment the transport is up, and a keen one
+   * emits join-queue immediately. That emit used to land while this function
+   * was still awaiting Redis, with the listeners not attached until the very
+   * end — and socket.io drops an event nobody is listening for. No error, no
+   * queue entry, no match: the user sat on a "searching" screen that was
+   * searching for nothing. Rare enough to look like bad luck, and it showed up
+   * as roughly one lost user per six simultaneous joins.
+   *
+   * Listening first fixes that, but on its own it would let a handler run
+   * before presence exists — and the sweep evicts anyone it cannot see as
+   * online, which loses the user just as silently. So the handlers wait on
+   * this promise instead: attached immediately, held until it is safe.
+   */
+  const ready = (async () => {
+    const evictedSocketId = await store.presence.register(user.id, socket.id, env.INSTANCE_ID);
+    if (evictedSocketId) {
+      // Same account opened elsewhere. Close the old socket, but leave any
+      // in-flight pair alone — the new socket adopts it below.
+      const old = io?.sockets.sockets.get(evictedSocketId);
+      old?.emit("session-replaced", { reason: "signed_in_elsewhere" });
+      old?.disconnect(true);
+    }
+  })();
+
+  registerHandlers(socket, ready);
+  await ready;
 
   // Cancel a pending reconnect teardown — they made it back in time.
   const pendingTimer = reconnectTimers.get(user.id);
@@ -240,39 +262,50 @@ async function onConnection(socket: AuthedSocket): Promise<void> {
     });
     await emitToUser(partnerId, "partner-reconnected", { roomId: existingPair.roomId });
   }
-
-  registerHandlers(socket);
 }
 
-function registerHandlers(socket: AuthedSocket): void {
+function registerHandlers(socket: AuthedSocket, ready: Promise<void>): void {
   const user = socket.user;
 
-  socket.on("join-queue", (payload) => detach(onJoinQueue(socket, payload), "socket:join-queue"));
-  socket.on("leave-queue", () => detach(onLeaveQueue(socket), "socket:leave-queue"));
+  /*
+   * Attached now, run once setup has finished.
+   *
+   * Chaining off `ready` rather than awaiting it here is the point: the
+   * listener exists from this moment, so nothing the client sends is dropped
+   * for want of one, and the work still happens in arrival order because each
+   * chain starts from the same settled promise.
+   */
+  const gate = (context: string, run: () => void | Promise<void>) =>
+    detach(ready.then(run), context);
 
-  socket.on("offer", (payload) => onSignal(socket, "offer", payload));
-  socket.on("answer", (payload) => onSignal(socket, "answer", payload));
-  socket.on("ice-candidate", (payload) => onSignal(socket, "ice-candidate", payload));
+  socket.on("join-queue", (payload) => gate("socket:join-queue", () => onJoinQueue(socket, payload)));
+  socket.on("leave-queue", () => gate("socket:leave-queue", () => onLeaveQueue(socket)));
 
-  socket.on("chat-message", (payload) => onChatMessage(socket, payload));
-  socket.on("typing", (payload) => onTyping(socket, payload));
+  socket.on("offer", (payload) => gate("socket:offer", () => onSignal(socket, "offer", payload)));
+  socket.on("answer", (payload) => gate("socket:answer", () => onSignal(socket, "answer", payload)));
+  socket.on("ice-candidate", (payload) =>
+    gate("socket:ice-candidate", () => onSignal(socket, "ice-candidate", payload)));
 
-  socket.on("skip", (payload) => detach(onLeaveChat(socket, payload, "skip"), "socket:skip"));
-  socket.on("end-chat", (payload) => detach(onLeaveChat(socket, payload, "end"), "socket:end-chat"));
+  socket.on("chat-message", (payload) => gate("socket:chat-message", () => onChatMessage(socket, payload)));
+  socket.on("typing", (payload) => gate("socket:typing", () => onTyping(socket, payload)));
 
-  socket.on("verify-gender", (payload, ack) => detach(onVerifyGender(socket, payload, ack), "socket:verify-gender"));
+  socket.on("skip", (payload) => gate("socket:skip", () => onLeaveChat(socket, payload, "skip")));
+  socket.on("end-chat", (payload) => gate("socket:end-chat", () => onLeaveChat(socket, payload, "end")));
+
+  socket.on("verify-gender", (payload, ack) =>
+    gate("socket:verify-gender", () => onVerifyGender(socket, payload, ack)));
   socket.on("queue-status", () => {
-    detach((async () => {
+    gate("socket:background", async () => {
       const store = stores();
       socket.emit("queue-status", {
         position: await matcher.queuePosition(user.id),
         size: await matcher.queueSize(),
         online: await store.presence.onlineCount(),
       });
-    })(), "socket:background");
+    });
   });
 
-  socket.on("disconnect", (reason) => detach(onDisconnect(socket, reason), "socket:disconnect"));
+  socket.on("disconnect", (reason) => gate("socket:disconnect", () => onDisconnect(socket, reason)));
 }
 
 // --- Queue -----------------------------------------------------------------
