@@ -51,7 +51,11 @@ describe("runtime API config", () => {
     expect(m.getSocketUrl()).toBe("https://fresh.example");
   });
 
-  it("cache-busts, because the document is served from a CDN", async () => {
+  it("asks past the browser cache", async () => {
+    // Only the browser's. raw.githubusercontent.com keeps the query string out
+    // of its cache key and answers with the same ETag either way, so an
+    // upstream CDN still serves the old body until its max-age runs out. That
+    // gap is refreshRuntimeConfig's job, not this parameter's.
     const fetchSpy = respond({ apiUrl: "https://fresh.example" });
     vi.stubGlobal("fetch", fetchSpy);
 
@@ -59,6 +63,7 @@ describe("runtime API config", () => {
     await m.loadRuntimeConfig();
 
     expect(String(fetchSpy.mock.calls[0][0])).toMatch(/[?&]t=\d+/);
+    expect(fetchSpy.mock.calls[0][1]).toMatchObject({ cache: "no-store" });
   });
 
   it("keeps the build-time value when the lookup fails", async () => {
@@ -117,5 +122,43 @@ describe("runtime API config", () => {
     await m.loadRuntimeConfig(20);
 
     expect(m.getApiUrl()).toBe("https://built-in.example");
+  });
+
+  describe("refreshRuntimeConfig", () => {
+    /*
+     * A tab that is already open holds one API host for its whole life. When
+     * the tunnel restarts that host stops resolving, and nothing in socket.io
+     * will ever try a different one — so the only route back is noticing the
+     * address changed. These cover the two answers that decision turns on.
+     */
+    it("reports a move when the host has changed", async () => {
+      vi.stubGlobal("fetch", respond({ apiUrl: "https://first.example" }));
+      const m = await load({ VITE_CONFIG_URL: "https://config.example/c.json" });
+      await m.loadRuntimeConfig();
+
+      vi.stubGlobal("fetch", respond({ apiUrl: "https://second.example" }));
+      expect(await m.refreshRuntimeConfig()).toBe(true);
+      expect(m.getSocketUrl()).toBe("https://second.example");
+    });
+
+    it("reports no move when the document still names the same host", async () => {
+      // What a stale CDN answer looks like. Treating it as a move would put
+      // the page into a reload loop until the cache expired.
+      vi.stubGlobal("fetch", respond({ apiUrl: "https://same.example" }));
+      const m = await load({ VITE_CONFIG_URL: "https://config.example/c.json" });
+      await m.loadRuntimeConfig();
+
+      expect(await m.refreshRuntimeConfig()).toBe(false);
+    });
+
+    it("reports no move when the lookup fails outright", async () => {
+      vi.stubGlobal("fetch", respond({ apiUrl: "https://known.example" }));
+      const m = await load({ VITE_CONFIG_URL: "https://config.example/c.json" });
+      await m.loadRuntimeConfig();
+
+      vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+      expect(await m.refreshRuntimeConfig()).toBe(false);
+      expect(m.getSocketUrl()).toBe("https://known.example");
+    });
   });
 });
