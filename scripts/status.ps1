@@ -27,6 +27,16 @@ Probe 'database' {
   if (-not $s.storeOk) { throw 'store reports not ok' }
   'reachable'
 }
+Probe 'redis' {
+  # The API refuses to boot when REDIS_URL is set and Redis is not answering —
+  # deliberately, since a silent fall back to per-process memory would split
+  # the queue across instances. That makes "is Redis up" a thing to check
+  # before wondering why the API will not start.
+  $s = Invoke-RestMethod 'http://localhost:3001/health' -TimeoutSec 8
+  if ($s.store -ne 'redis') { throw "API is using the $($s.store) store" }
+  if (-not $s.storeOk) { throw 'store is not answering' }
+  'connected'
+}
 Probe 'gender model' {
   $s = Invoke-RestMethod 'http://localhost:3001/api/stats' -TimeoutSec 8
   if (-not $s.genderReady) { throw "not ready ($($s.genderProvider))" }

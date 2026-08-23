@@ -2,6 +2,11 @@ node_modules/
 dist/
 .env
 .env.local
+# Backups written by set-turn.ps1 and by hand. These hold the same secrets
+# as .env, so they must never be committed either.
+.env.bak
+.env.*.bak
+.env.bak.*
 *.log
 .vercel/
 .DS_Store
