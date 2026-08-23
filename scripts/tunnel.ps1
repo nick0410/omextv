@@ -56,15 +56,26 @@ if (-not $url) { throw "Tunnel did not come up. See $log" }
 Write-Host "Tunnel: $url"
 
 # Confirm it actually serves before rebuilding against it.
+#
+# This is a warning, not a gate. A brand-new hostname takes a moment to
+# propagate, and some resolvers hand back only an unroutable AAAA record for
+# trycloudflare.com — in both cases the tunnel is fine for everyone else while
+# being unreachable from here. Aborting on that used to leave the deployed
+# site pointing at the *previous*, genuinely dead tunnel, which is far worse
+# than deploying one this machine merely cannot see.
 $ok = $false
-foreach ($i in 1..10) {
+foreach ($i in 1..20) {
   try {
     Invoke-RestMethod -Uri "$url/health" -TimeoutSec 10 | Out-Null
     $ok = $true
     break
-  } catch { Start-Sleep -Seconds 3 }
+  } catch { Start-Sleep -Seconds 5 }
 }
-if (-not $ok) { throw "Tunnel is up but not serving. See $log" }
+if ($ok) {
+  Write-Host 'Tunnel is serving.' -ForegroundColor Green
+} else {
+  Write-Warning "Could not reach $url from this machine (likely local DNS). Deploying anyway."
+}
 
 Push-Location (Join-Path $PSScriptRoot '..\client')
 try {
