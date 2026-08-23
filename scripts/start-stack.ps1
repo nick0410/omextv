@@ -38,7 +38,18 @@ if (Test-Path $pgDir) {
 # would then share one 256 MB noeviction budget, so the other app filling it
 # would make Omextv's writes start failing — a failure that looks like
 # matchmaking randomly breaking rather than like a full database.
+#
+# Read from server/.env rather than written down again here. The port lived in
+# both places once and they drifted, which is a silent failure: whichever one
+# is wrong still starts a perfectly healthy Redis, just not the one the API
+# dials.
+$envFile = Join-Path $PSScriptRoot '..\server\.env'
 $redisPort = 6380
+if (Test-Path $envFile) {
+  $m = Select-String -Path $envFile -Pattern '^\s*REDIS_URL\s*=\s*"?redis://[^:]+:(\d+)' |
+    Select-Object -First 1
+  if ($m) { $redisPort = [int]$m.Matches[0].Groups[1].Value }
+}
 $redisData = Join-Path $redisDir 'omextv-data'
 
 $mine = Get-Process -Name 'redis-server' -ErrorAction SilentlyContinue
@@ -49,17 +60,26 @@ if (-not $listening) {
   if (-not (Test-Path "$redisDir\redis-server.exe")) {
     throw "Redis not found at $redisDir. Unset REDIS_URL in server/.env to run without it."
   }
-  Write-Host 'Starting Redis...'
-  # --save keeps a periodic snapshot so a restart does not start from nothing.
+  Write-Host "Starting Redis on $redisPort..."
+  # Every one of these has to name the port explicitly. Defaulting anywhere
+  # here is what the port move was undoing: an unqualified start or ping talks
+  # to 6379, which is the *other* application's instance. The script then
+  # reports a healthy PONG from a server the API never connects to, leaves
+  # 6380 empty, and the API refuses to boot a step later — the confusing,
+  # blames-the-wrong-component failure this file exists to prevent.
+  New-Item -ItemType Directory -Path $redisData -Force | Out-Null
+  # --save keeps a periodic snapshot so a restart does not start from nothing,
+  # and --dir keeps that snapshot in Omextv's own folder rather than shared.
   Start-Process -FilePath "$redisDir\redis-server.exe" `
-    -ArgumentList '--port', '6379', '--save', '60', '1', '--appendonly', 'no',
+    -ArgumentList '--port', $redisPort, '--dir', $redisData,
+                  '--save', '60', '1', '--appendonly', 'no',
                   '--maxmemory', '256mb', '--maxmemory-policy', 'noeviction' `
     -WorkingDirectory $redisDir -WindowStyle Hidden
   Start-Sleep -Seconds 3
 }
-$pong = & "$redisDir\redis-cli.exe" ping
-if ($pong -ne 'PONG') { throw "Redis did not answer (got '$pong')" }
-Write-Host 'Redis: PONG' -ForegroundColor Green
+$pong = & "$redisDir\redis-cli.exe" -p $redisPort ping
+if ($pong -ne 'PONG') { throw "Redis did not answer on $redisPort (got '$pong')" }
+Write-Host "Redis: PONG on $redisPort" -ForegroundColor Green
 
 # --- API ---
 $apiUp = $false

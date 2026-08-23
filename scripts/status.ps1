@@ -78,12 +78,31 @@ Probe 'site' {
 }
 
 if ($url) {
-  Probe 'site -> tunnel match' {
-    $html = Invoke-WebRequest 'https://omextv.vercel.app' -TimeoutSec 30 -UseBasicParsing
-    $asset = [regex]::Match($html.Content, '/assets/index-[A-Za-z0-9_-]+\.js').Value
-    $js = Invoke-WebRequest "https://omextv.vercel.app$asset" -TimeoutSec 45 -UseBasicParsing
-    if ($js.Content -notlike "*$url*") { throw 'deployed bundle points at a different tunnel' }
-    'current'
+  # What visitors will actually dial.
+  #
+  # This used to grep the deployed JS bundle for the hostname, which stopped
+  # meaning anything once the client started reading runtime-config.json at
+  # boot: the bundle only carries a build-time fallback now, so the check
+  # passed or failed on a value nobody uses. The published document is the
+  # authority, so ask it.
+  Probe 'published config' {
+    $raw = 'https://raw.githubusercontent.com/nick0410/omextv/main/runtime-config.json'
+    # ConvertFrom-Json explicitly: raw.githubusercontent.com serves .json as
+    # text/plain, and Invoke-RestMethod only parses when the content type says
+    # JSON. Left to itself it hands back the raw string, every property reads
+    # as empty, and the comparison below fails no matter what was published.
+    $body = Invoke-RestMethod "${raw}?t=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())" -TimeoutSec 20
+    # TrimStart the BOM: copies published before tunnel.ps1 stopped writing
+    # one still carry it, and it is not valid JSON to a strict parser.
+    $doc = $body.TrimStart([char]0xFEFF) | ConvertFrom-Json
+    if ($doc.apiUrl -ne $url) {
+      # raw.githubusercontent.com leaves the query string out of its cache key,
+      # so for up to five minutes after a tunnel restart this genuinely still
+      # serves the old hostname. Worth saying plainly rather than reporting it
+      # as a mismatch someone needs to fix.
+      throw "names $($doc.apiUrl); if the tunnel just restarted, give the CDN five minutes"
+    }
+    'matches the live tunnel'
   }
 }
 

@@ -93,7 +93,14 @@ $config = [ordered]@{
   apiUrl    = $url
   socketUrl = $url
 }
-$config | ConvertTo-Json | Set-Content -Path $configPath -Encoding UTF8
+# Written without a byte-order mark. Set-Content -Encoding UTF8 adds one, and
+# GitHub serves this file as text/plain, so every consumer that parses the text
+# itself hits an invalid leading character. Browsers happen to strip it during
+# their UTF-8 decode; PowerShell's ConvertFrom-Json does not, which is how it
+# was found. WriteAllText with an explicit encoding behaves the same on
+# PowerShell 5.1 and 7.
+$json = $config | ConvertTo-Json
+[System.IO.File]::WriteAllText($configPath, $json, (New-Object System.Text.UTF8Encoding($false)))
 
 Push-Location $repo
 try {
@@ -111,15 +118,25 @@ try {
   Pop-Location
 }
 
-# raw.githubusercontent.com caches for five minutes, and the client appends a
-# cache-buster — but confirm the document itself actually reflects the change
-# before claiming the site is fixed.
+# Confirm the document really reflects the change before claiming the site is
+# fixed.
+#
+# The push landing is not the same as visitors seeing it: raw.githubusercontent
+# caches for five minutes and ignores query strings when deciding what to serve,
+# so the cache-buster the client sends does not shorten this at all. The wait
+# below is the real propagation delay, not a formality.
 $raw = 'https://raw.githubusercontent.com/nick0410/omextv/main/runtime-config.json'
 $published = $false
 foreach ($i in 1..10) {
   Start-Sleep -Seconds 3
   try {
-    $doc = Invoke-RestMethod "${raw}?t=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())" -TimeoutSec 15
+    # ConvertFrom-Json explicitly — see status.ps1. Without it this compared
+    # a property of a plain string against $url, which is never equal, so the
+    # loop always ran out and always warned that publishing had not caught up.
+    # A warning that fires every single time is one nobody can act on, and it
+    # would have hidden a push that genuinely failed.
+    $body = Invoke-RestMethod "${raw}?t=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())" -TimeoutSec 15
+    $doc = $body.TrimStart([char]0xFEFF) | ConvertFrom-Json
     if ($doc.apiUrl -eq $url) { $published = $true; break }
   } catch { }
 }
