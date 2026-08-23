@@ -17,7 +17,8 @@
     "models:fetch": "node scripts/fetch-models.mjs",
     "gender:check": "tsx scripts/gender-check.ts",
     "migrate:dev": "prisma migrate dev",
-    "migrate:deploy": "prisma migrate deploy"
+    "migrate:deploy": "prisma migrate deploy",
+    "probe": "node scripts/probe.mjs && node scripts/probe2.mjs"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

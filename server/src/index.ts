@@ -54,17 +54,49 @@ app.use(
 app.use(express.json({ limit: "6mb" }));
 app.use(cookieParser());
 
+/**
+ * Is this instance able to do its job?
+ *
+ * Both dependencies count. A dead Redis means the node cannot see the shared
+ * queue; a dead database means nobody can sign in, no session is recorded and
+ * no report is stored. This used to check only the store, so with Postgres
+ * down it cheerfully reported "ok" while every login returned a 500 — exactly
+ * the outage a health check exists to catch.
+ *
+ * Each probe is bounded: a hung dependency must not hang the endpoint that is
+ * supposed to report it as hung.
+ */
+async function withTimeout<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const guard = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  return Promise.race([work, guard]).finally(() => clearTimeout(timer));
+}
+
 app.get("/health", async (_req, res) => {
   const store = stores();
-  const storeOk = await store.ping();
-  // A dead Redis means this node cannot see the shared queue at all, so it
-  // must fail its health check and be pulled from the load balancer.
-  res.status(storeOk ? 200 : 503).json({
-    status: storeOk ? "ok" : "degraded",
+
+  const [storeOk, dbOk] = await Promise.all([
+    withTimeout(store.ping(), 3000, false),
+    withTimeout(
+      prisma.$queryRaw`SELECT 1`.then(
+        () => true,
+        () => false,
+      ),
+      3000,
+      false,
+    ),
+  ]);
+
+  const healthy = storeOk && dbOk;
+  res.status(healthy ? 200 : 503).json({
+    status: healthy ? "ok" : "degraded",
     name: "Omextv API",
     version: "2.1.0",
     store: store.kind,
     storeOk,
+    dbOk,
   });
 });
 

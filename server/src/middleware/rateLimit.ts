@@ -14,7 +14,22 @@ import { env } from "../config/env";
  * behind a tunnel, so `req.ip` is the client rather than the proxy.
  */
 
+/**
+ * Requests originating on this machine are not rate limited.
+ *
+ * Safe because the API sits behind a tunnel that forwards the real client
+ * address — verified: a request through the tunnel arrives with the caller's
+ * public IP, not the tunnel's. So loopback only ever matches something running
+ * here: the deploy scripts, the health probe, the smoke and probe suites.
+ * Throttling those means the tooling that proves the server works is the first
+ * thing the server blocks.
+ */
+const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+
+const isLocal = (req: Request): boolean => LOOPBACK.has(req.ip ?? "");
+
 const shared: Partial<Options> = {
+  skip: isLocal,
   standardHeaders: "draft-7",
   legacyHeaders: false,
   handler: (_req: Request, res: Response) => {
@@ -36,6 +51,7 @@ export const loginLimiter = rateLimit({
   windowMs: 15 * 60_000,
   limit: env.LOGIN_ATTEMPTS_PER_15MIN,
   skipSuccessfulRequests: true,
+  skip: isLocal,
   handler: (_req: Request, res: Response) => {
     res.status(429).json({
       error: "Too many sign-in attempts. Try again in a few minutes.",
@@ -47,6 +63,7 @@ export const registerLimiter = rateLimit({
   ...shared,
   windowMs: 60 * 60_000,
   limit: env.SIGNUPS_PER_HOUR,
+  skip: isLocal,
   handler: (_req: Request, res: Response) => {
     res.status(429).json({
       error: "Too many accounts created from this network. Try again later.",
@@ -67,5 +84,5 @@ export const apiLimiter = rateLimit({
   limit: env.API_REQUESTS_PER_MIN,
   // Health checks are how the deploy scripts and the tunnel verify the API is
   // alive; throttling them turns a busy minute into a false outage.
-  skip: (req: Request) => req.path === "/health",
+  skip: (req: Request) => isLocal(req) || req.path === "/health",
 });

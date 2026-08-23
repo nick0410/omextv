@@ -23,8 +23,11 @@ function Probe($label, $block) {
 Write-Host ''
 Probe 'API (localhost)' { (Invoke-RestMethod 'http://localhost:3001/health' -TimeoutSec 8).store }
 Probe 'database' {
-  $s = Invoke-RestMethod 'http://localhost:3001/health' -TimeoutSec 8
-  if (-not $s.storeOk) { throw 'store reports not ok' }
+  # The API reports this itself now. It used to answer "ok" with Postgres
+  # stopped, because /health only pinged Redis — so every login returned a 500
+  # while the health check said the instance was fine.
+  $s = Invoke-RestMethod 'http://localhost:3001/health' -TimeoutSec 10
+  if (-not $s.dbOk) { throw 'the API cannot reach Postgres' }
   'reachable'
 }
 Probe 'redis' {
