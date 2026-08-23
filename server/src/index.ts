@@ -171,6 +171,30 @@ async function shutdown(signal: string): Promise<void> {
   }
 }
 
+/*
+ * Stay up when something unexpected throws.
+ *
+ * Node exits on an unhandled rejection by default, which for this process
+ * means every call in progress drops for everyone. That is almost never the
+ * right trade: one broken request is survivable, a dead server is not.
+ * Stopping Redis used to take the whole API down this way, health endpoint
+ * included, so there was nothing left to report the problem.
+ *
+ * These are a backstop, not a licence to ignore errors — anything logged here
+ * is a missing `.catch` somewhere and should be fixed at the source. An
+ * uncaught *exception* leaves less certainty about internal state, so it is
+ * logged loudly but still not fatal; the health check reports the store being
+ * unreachable, which is what a supervisor should restart on.
+ */
+process.on("unhandledRejection", (reason) => {
+  const message = reason instanceof Error ? reason.stack ?? reason.message : String(reason);
+  console.error("[unhandledRejection]", message);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("[uncaughtException]", err.stack ?? err.message);
+});
+
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
 

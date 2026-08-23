@@ -31,7 +31,21 @@ if (Test-Path $pgDir) {
 }
 
 # --- Redis ---
-if (-not (Running 'redis-server')) {
+# Port 6380, not the default.
+#
+# Something else on this machine already wanted Redis on 6379 and quietly
+# started writing its own job queue into the instance Omextv was using. They
+# would then share one 256 MB noeviction budget, so the other app filling it
+# would make Omextv's writes start failing — a failure that looks like
+# matchmaking randomly breaking rather than like a full database.
+$redisPort = 6380
+$redisData = Join-Path $redisDir 'omextv-data'
+
+$mine = Get-Process -Name 'redis-server' -ErrorAction SilentlyContinue
+$listening = Test-NetConnection -ComputerName 'localhost' -Port $redisPort `
+  -InformationLevel Quiet -WarningAction SilentlyContinue
+
+if (-not $listening) {
   if (-not (Test-Path "$redisDir\redis-server.exe")) {
     throw "Redis not found at $redisDir. Unset REDIS_URL in server/.env to run without it."
   }

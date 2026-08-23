@@ -16,6 +16,7 @@ import {
 import type { PairRecord } from "./store/types";
 import { genderService } from "./gender/service";
 import { RateLimiter } from "../utils/rateLimiter";
+import { detach } from "../utils/detach";
 import { parseMatchFilters, genderVerifySchema } from "../utils/validation";
 import {
   JWTPayload,
@@ -93,10 +94,10 @@ export function setupSocket(httpServer: HttpServer): Server {
   io.use(authMiddleware);
 
   io.on("connection", (socket) => {
-    void onConnection(socket as AuthedSocket);
+    detach(onConnection(socket as AuthedSocket), "socket:connection");
   });
 
-  void subscribeToBus();
+  detach(subscribeToBus(), "socket:bus");
   startTimers();
   return io;
 }
@@ -119,12 +120,12 @@ async function subscribeToBus(): Promise<void> {
     };
     if (typeof userId !== "string" || typeof event !== "string") return;
 
-    void (async () => {
+    detach((async () => {
       const socketId = await stores().presence.socketOf(userId);
       if (!socketId) return;
       const socket = io?.sockets.sockets.get(socketId);
       socket?.emit(event, payload);
-    })();
+    })(), "socket:background");
   });
 }
 
@@ -246,8 +247,8 @@ async function onConnection(socket: AuthedSocket): Promise<void> {
 function registerHandlers(socket: AuthedSocket): void {
   const user = socket.user;
 
-  socket.on("join-queue", (payload) => void onJoinQueue(socket, payload));
-  socket.on("leave-queue", () => void onLeaveQueue(socket));
+  socket.on("join-queue", (payload) => detach(onJoinQueue(socket, payload), "socket:join-queue"));
+  socket.on("leave-queue", () => detach(onLeaveQueue(socket), "socket:leave-queue"));
 
   socket.on("offer", (payload) => onSignal(socket, "offer", payload));
   socket.on("answer", (payload) => onSignal(socket, "answer", payload));
@@ -256,22 +257,22 @@ function registerHandlers(socket: AuthedSocket): void {
   socket.on("chat-message", (payload) => onChatMessage(socket, payload));
   socket.on("typing", (payload) => onTyping(socket, payload));
 
-  socket.on("skip", (payload) => void onLeaveChat(socket, payload, "skip"));
-  socket.on("end-chat", (payload) => void onLeaveChat(socket, payload, "end"));
+  socket.on("skip", (payload) => detach(onLeaveChat(socket, payload, "skip"), "socket:skip"));
+  socket.on("end-chat", (payload) => detach(onLeaveChat(socket, payload, "end"), "socket:end-chat"));
 
-  socket.on("verify-gender", (payload, ack) => void onVerifyGender(socket, payload, ack));
+  socket.on("verify-gender", (payload, ack) => detach(onVerifyGender(socket, payload, ack), "socket:verify-gender"));
   socket.on("queue-status", () => {
-    void (async () => {
+    detach((async () => {
       const store = stores();
       socket.emit("queue-status", {
         position: await matcher.queuePosition(user.id),
         size: await matcher.queueSize(),
         online: await store.presence.onlineCount(),
       });
-    })();
+    })(), "socket:background");
   });
 
-  socket.on("disconnect", (reason) => void onDisconnect(socket, reason));
+  socket.on("disconnect", (reason) => detach(onDisconnect(socket, reason), "socket:disconnect"));
 }
 
 // --- Queue -----------------------------------------------------------------
@@ -481,7 +482,7 @@ function onSignal(socket: AuthedSocket, event: string, payload: unknown): void {
   const { roomId } = payload as { roomId?: unknown };
   if (typeof roomId !== "string") return;
 
-  void (async () => {
+  detach((async () => {
     const store = stores();
     if (!(await store.pairing.isMember(user.id, roomId))) {
       socket.emit("signal-rejected", { code: "not_a_member", roomId });
@@ -489,7 +490,7 @@ function onSignal(socket: AuthedSocket, event: string, payload: unknown): void {
     }
     await store.pairing.touch(roomId, Date.now());
     socket.to(roomId).emit(event, { ...(payload as object), from: user.id });
-  })();
+  })(), "socket:background");
 }
 
 // --- Text chat -------------------------------------------------------------
@@ -522,7 +523,7 @@ function onChatMessage(socket: AuthedSocket, payload: unknown): void {
     timestamp: Date.now(),
   };
 
-  void (async () => {
+  detach((async () => {
     const store = stores();
     if (!(await store.pairing.isMember(user.id, roomId))) {
       socket.emit("message-rejected", { code: "not_a_member" });
@@ -530,17 +531,17 @@ function onChatMessage(socket: AuthedSocket, payload: unknown): void {
     }
     await store.pairing.noteMessage(roomId, Date.now());
     io?.to(roomId).emit("chat-message", message);
-  })();
+  })(), "socket:background");
 }
 
 function onTyping(socket: AuthedSocket, payload: unknown): void {
   if (typeof payload !== "object" || payload === null) return;
   const { roomId, isTyping } = payload as { roomId?: unknown; isTyping?: unknown };
   if (typeof roomId !== "string") return;
-  void (async () => {
+  detach((async () => {
     if (!(await stores().pairing.isMember(socket.user.id, roomId))) return;
     socket.to(roomId).emit("typing", { userId: socket.user.id, isTyping: isTyping === true });
-  })();
+  })(), "socket:background");
 }
 
 // --- Leaving a chat --------------------------------------------------------
@@ -664,7 +665,7 @@ async function onDisconnect(socket: AuthedSocket, reason: string): Promise<void>
     });
 
     const timer = setTimeout(() => {
-      void (async () => {
+      detach((async () => {
         reconnectTimers.delete(user.id);
         if (await store.presence.isOnline(user.id)) return; // came back
         const stillPaired = await store.pairing.pairOf(user.id);
@@ -672,7 +673,7 @@ async function onDisconnect(socket: AuthedSocket, reason: string): Promise<void>
 
         await teardownPair(pair.roomId, "disconnect", user.id);
         await emitToUser(partnerId, "partner-left", { reason: "disconnect", roomId: pair.roomId });
-      })();
+      })(), "socket:background");
     }, env.RECONNECT_GRACE_MS);
 
     reconnectTimers.set(user.id, timer);
@@ -719,14 +720,13 @@ async function emitToUser(userId: string, event: string, payload: unknown): Prom
 function startTimers(): void {
   // Re-evaluate waiting users so relaxation stages actually take effect.
   sweepTimer = setInterval(() => {
-    try {
-      void (async () => {
+    detach(
+      (async () => {
         const matches = await matcher.sweep();
         for (const match of matches) await establishMatch(match);
-      })();
-    } catch (err) {
-      console.error("[socket] sweep failed:", err);
-    }
+      })(),
+      "socket:sweep",
+    );
   }, env.MATCH_SWEEP_INTERVAL_MS);
 
   janitorTimer = setInterval(() => {
@@ -734,17 +734,17 @@ function startTimers(): void {
       queueLimiter.sweep();
       messageLimiter.sweep();
       signalLimiter.sweep();
-      void stores().pairing.sweepRecent(60 * 60_000, Date.now());
+      detach(stores().pairing.sweepRecent(60 * 60_000, Date.now()), "socket:sweep-recent");
 
       if (env.CHAT_IDLE_TIMEOUT_MS > 0) {
-        void (async () => {
+        detach((async () => {
           const idle = await stores().pairing.findIdle(env.CHAT_IDLE_TIMEOUT_MS, Date.now());
           for (const pair of idle) {
             await teardownPair(pair.roomId, "timeout", null);
             await emitToUser(pair.userAId, "partner-left", { reason: "timeout", roomId: pair.roomId });
             await emitToUser(pair.userBId, "partner-left", { reason: "timeout", roomId: pair.roomId });
           }
-        })();
+        })(), "socket:background");
       }
     } catch (err) {
       console.error("[socket] janitor failed:", err);
