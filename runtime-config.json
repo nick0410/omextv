@@ -1,6 +1,6 @@
 {
     "_comment":  "Where the live API is. Rewritten by scripts/tunnel.ps1; the deployed client reads it at boot so a new tunnel needs no rebuild.",
-    "updatedAt":  "2026-08-24T14:01:50Z",
-    "apiUrl":  "https://shift-experiment-doc-toolbox.trycloudflare.com",
-    "socketUrl":  "https://shift-experiment-doc-toolbox.trycloudflare.com"
+    "updatedAt":  "2026-08-24T15:31:00Z",
+    "apiUrl":  "https://api.trycloudflare.com",
+    "socketUrl":  "https://api.trycloudflare.com"
 }
