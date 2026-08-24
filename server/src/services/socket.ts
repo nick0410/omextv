@@ -18,6 +18,7 @@ import { genderService } from "./gender/service";
 import { RateLimiter } from "../utils/rateLimiter";
 import { detach } from "../utils/detach";
 import { parseMatchFilters, genderVerifySchema } from "../utils/validation";
+import { applyEntitlement } from "./coins/entitlement";
 import {
   JWTPayload,
   QueueEntry,
@@ -340,7 +341,27 @@ async function onJoinQueue(socket: AuthedSocket, payload: unknown): Promise<void
     return;
   }
 
-  const filters = parseMatchFilters(payload);
+  /*
+   * Free accounts match anyone.
+   *
+   * Choosing a gender or a country is what premium sells, so the limit is
+   * applied here, where the request actually takes effect, rather than in the
+   * UI. The controls are disabled there too, but that is a courtesy: this
+   * payload arrives over a socket and can be sent by hand.
+   *
+   * Clamped rather than refused — see applyEntitlement. The client is told
+   * what was dropped so it can say so plainly instead of leaving someone to
+   * wonder why they are meeting people they filtered out.
+   */
+  const requested = parseMatchFilters(payload);
+  const { filters, dropped } = applyEntitlement(requested, user.isPremium);
+  if (dropped.length > 0) {
+    socket.emit("filters-restricted", {
+      dropped,
+      message:
+        "Choosing who you meet is a premium feature. Searching everyone for now.",
+    });
+  }
 
   try {
     const entry = await buildQueueEntry(socket, filters);

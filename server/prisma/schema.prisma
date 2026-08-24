@@ -11,18 +11,18 @@ datasource db {
 /// vision model inferred from a live camera frame. Matching prefers the
 /// verified value when it is fresh and confident, else falls back to declared.
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  passwordHash  String
-  username      String    @unique
+  id           String @id @default(cuid())
+  email        String @unique
+  passwordHash String
+  username     String @unique
 
   // --- Gender ---
-  gender             String // self-declared: "male" | "female" | "other"
-  verifiedGender     String? // model-inferred: "male" | "female" | null
-  genderConfidence   Float? // 0..1 confidence of the last accepted inference
-  genderVerifiedAt   DateTime?
-  genderAttempts     Int       @default(0) // total inference attempts (abuse signal)
-  genderMismatch     Boolean   @default(false) // declared != verified at high confidence
+  gender           String // self-declared: "male" | "female" | "other"
+  verifiedGender   String? // model-inferred: "male" | "female" | null
+  genderConfidence Float? // 0..1 confidence of the last accepted inference
+  genderVerifiedAt DateTime?
+  genderAttempts   Int       @default(0) // total inference attempts (abuse signal)
+  genderMismatch   Boolean   @default(false) // declared != verified at high confidence
 
   // --- Location ---
   country String? // ISO 3166-1 alpha-2, uppercase
@@ -31,6 +31,11 @@ model User {
   // --- Premium ---
   isPremium     Boolean   @default(false)
   premiumExpiry DateTime?
+
+  /// Spendable balance. The ledger is the audit trail; this is the running
+  /// total, kept in step with it inside the same transaction so a crash
+  /// between the two cannot leave a balance nobody can account for.
+  coins Int @default(0)
 
   // --- Moderation ---
   isBanned    Boolean   @default(false)
@@ -43,14 +48,16 @@ model User {
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
-  reports      Report[]      @relation("reporter")
-  reportedBy   Report[]      @relation("reported")
-  sessions     Session[]
-  payments     Payment[]
-  blocksMade   Block[]       @relation("blocker")
-  blocksAgainst Block[]      @relation("blocked")
-  chatsAsA     ChatSession[] @relation("participantA")
-  chatsAsB     ChatSession[] @relation("participantB")
+  reports       Report[]      @relation("reporter")
+  reportedBy    Report[]      @relation("reported")
+  sessions      Session[]
+  payments      Payment[]
+  blocksMade    Block[]       @relation("blocker")
+  blocksAgainst Block[]       @relation("blocked")
+  chatsAsA      ChatSession[] @relation("participantA")
+  chatsAsB      ChatSession[] @relation("participantB")
+  coinOrders    CoinOrder[]
+  coinLedger    CoinLedger[]
 
   @@index([isBanned])
   @@index([country])
@@ -147,4 +154,61 @@ model Payment {
 
   @@index([userId])
   @@index([razorpayOrderId])
+}
+
+/// A coin purchase paid by scanning a UPI QR.
+///
+/// A direct UPI transfer produces no callback: the money simply lands in the
+/// payee's account and nothing tells the server about it. So the order records
+/// what was promised, holds the reference the payer reads off their own bank
+/// app, and waits for a human to match it against the statement. Coins are
+/// credited on approval and never before — a "mark as paid" button the payer
+/// controls is a button that hands out premium for free.
+model CoinOrder {
+  id          String    @id @default(cuid())
+  userId      String
+  packId      String
+  /// Fixed when the order is created, so repricing the catalogue later cannot
+  /// change what an already-paid order is worth.
+  coins       Int
+  amountPaise Int
+  /// "awaiting_payment" | "under_review" | "approved" | "rejected"
+  status      String    @default("awaiting_payment")
+  /// The UPI reference (UTR) the payer submits. Unique across every order so
+  /// the same transfer cannot be claimed by two accounts, or twice by one.
+  upiRef      String?   @unique
+  /// Why it was rejected, shown to the payer.
+  note        String?
+  reviewedBy  String?
+  reviewedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+/// Every movement of coins, with the balance it produced.
+///
+/// Money questions are asked after the fact — "why do I have 300?", "did that
+/// order get credited twice?" — and a bare balance cannot answer them. Each
+/// row records the delta and the balance it resulted in, so the history can be
+/// replayed and checked against the total.
+model CoinLedger {
+  id           String   @id @default(cuid())
+  userId       String
+  delta        Int
+  balanceAfter Int
+  /// "purchase" | "pass" | "refund" | "adjustment"
+  reason       String
+  /// The CoinOrder or pass id this movement came from.
+  refId        String?
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
 }

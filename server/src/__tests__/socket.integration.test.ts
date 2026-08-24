@@ -359,7 +359,10 @@ describe.skipIf(!isDbReady())("matchmaking", () => {
   });
 
   it("respects a country filter and does not mismatch", async () => {
-    const jp = await makeUser({ country: "JP" });
+    // Premium, because a country filter is premium-only now — a free account's
+    // would be cleared before the matcher ever saw it, and this test would
+    // pass by matching everyone rather than by filtering correctly.
+    const jp = await makeUser({ country: "JP", isPremium: true });
     const br = await makeUser({ country: "BR" });
 
     const sjp = await connect(jp.token);
@@ -379,8 +382,8 @@ describe.skipIf(!isDbReady())("matchmaking", () => {
   });
 
   it("matches when both country filters agree", async () => {
-    const jp = await makeUser({ country: "JP" });
-    const inUser = await makeUser({ country: "IN" });
+    const jp = await makeUser({ country: "JP", isPremium: true });
+    const inUser = await makeUser({ country: "IN", isPremium: true });
 
     const sjp = await connect(jp.token);
     const sin = await connect(inUser.token);
@@ -396,8 +399,8 @@ describe.skipIf(!isDbReady())("matchmaking", () => {
   });
 
   it("respects a gender filter in both directions", async () => {
-    const man = await makeUser({ gender: "male" });
-    const otherMan = await makeUser({ gender: "male" });
+    const man = await makeUser({ gender: "male", isPremium: true });
+    const otherMan = await makeUser({ gender: "male", isPremium: true });
 
     const s1 = await connect(man.token);
     const s2 = await connect(otherMan.token);
@@ -419,7 +422,7 @@ describe.skipIf(!isDbReady())("matchmaking", () => {
       genderConfidence: 0.95,
       genderVerifiedAt: new Date(),
     });
-    const seeker = await makeUser({ gender: "male" });
+    const seeker = await makeUser({ gender: "male", isPremium: true });
 
     const s1 = await connect(declaredMale.token);
     const s2 = await connect(seeker.token);
@@ -446,7 +449,7 @@ describe.skipIf(!isDbReady())("matchmaking", () => {
       genderConfidence: 0.95,
       genderVerifiedAt: new Date(Date.now() - 48 * 60 * 60_000),
     });
-    const seeker = await makeUser({ gender: "male" });
+    const seeker = await makeUser({ gender: "male", isPremium: true });
 
     const s1 = await connect(stale.token);
     const s2 = await connect(seeker.token);
@@ -464,23 +467,69 @@ describe.skipIf(!isDbReady())("matchmaking", () => {
   it("puts a premium user ahead of an older standard waiter", async () => {
     const std = await makeUser({ gender: "male" });
     const prem = await makeUser({ gender: "male", isPremium: true });
-    const woman = await makeUser({ gender: "female" });
+    const woman = await makeUser({ gender: "female", isPremium: true });
+
+    /*
+     * Kept apart by a block, not by a filter.
+     *
+     * The two men used to each ask for women, which is what stopped them
+     * pairing with each other. A gender filter is premium-only now, so the
+     * standard waiter cannot express that at all — his filter would be cleared
+     * and he would pair with the premium user immediately, and the test would
+     * be measuring nothing. A block is free, applies in both directions, and
+     * holds them both in the queue for the same reason.
+     */
+    await prisma.block.create({ data: { blockerId: std.id, blockedId: prem.id } });
 
     const sStd = await connect(std.token);
     const sPrem = await connect(prem.token);
     const sW = await connect(woman.token);
     await Promise.all([once(sStd, "connected"), once(sPrem, "connected"), once(sW, "connected")]);
 
-    // Both men want women, so they never pair with each other.
-    sStd.emit("join-queue", { gender: "female" });
+    sStd.emit("join-queue", {});
     await once(sStd, "queue-joined");
-    sPrem.emit("join-queue", { gender: "female" });
+    sPrem.emit("join-queue", {});
     await once(sPrem, "queue-joined");
 
     const matched = once<{ partner: { userId: string } }>(sW, "match-found");
     sW.emit("join-queue", { gender: "male" });
 
     expect((await matched).partner.userId).toBe(prem.id);
+  });
+
+  it("ignores the filters a free account sends, and says so", async () => {
+    // The paywall, where it actually lives. The panel disables these controls,
+    // but the payload arrives over a socket and can be sent by hand.
+    const man = await makeUser({ gender: "male", country: "JP" });
+    const otherMan = await makeUser({ gender: "male", country: "BR" });
+
+    const s1 = await connect(man.token);
+    const s2 = await connect(otherMan.token);
+    await Promise.all([once(s1, "connected"), once(s2, "connected")]);
+
+    const told = once<{ dropped: string[] }>(s1, "filters-restricted");
+    s1.emit("join-queue", { gender: "female", countries: ["IN"] });
+
+    expect((await told).dropped).toEqual(["gender", "country"]);
+
+    // And the search went ahead rather than failing: two men who each asked
+    // for women in India are matched with each other.
+    const matched = once(s1, "match-found");
+    s2.emit("join-queue", {});
+    expect(await matched).toBeTruthy();
+  });
+
+  it("says nothing when a free account asked for nothing", async () => {
+    const a = await makeUser();
+    const sa = await connect(a.token);
+    await once(sa, "connected");
+
+    sa.emit("join-queue", {});
+    await once(sa, "queue-joined");
+
+    // A notice on every plain join would be noise, and would train people to
+    // ignore the one that matters.
+    await never(sa, "filters-restricted", 300);
   });
 
   it("re-queues the survivor when the partner vanishes before the match lands", async () => {

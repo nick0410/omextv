@@ -101,6 +101,26 @@ export const env = {
   RAZORPAY_KEY_ID: str("RAZORPAY_KEY_ID"),
   RAZORPAY_KEY_SECRET: str("RAZORPAY_KEY_SECRET"),
 
+  // --- Direct UPI ---
+  /**
+   * The VPA money is collected at, e.g. "yourname@paytm". Empty disables the
+   * whole UPI flow rather than showing a QR that pays nobody — a wrong or
+   * missing payee here does not fail loudly, it sends a stranger's money
+   * somewhere it cannot be recovered from.
+   */
+  UPI_ID: str("UPI_ID"),
+  /** Shown by the payer's UPI app before they confirm, so they know who they are paying. */
+  UPI_PAYEE_NAME: str("UPI_PAYEE_NAME", "Omextv"),
+  /**
+   * Who may approve payments, by email, comma-separated. There is no callback
+   * on a direct UPI transfer, so approval is a human matching a reference
+   * against a bank statement — and that power has to be held by someone.
+   */
+  ADMIN_EMAILS: str("ADMIN_EMAILS", "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
+
   // --- Gender inference ---
   GENDER_PROVIDER: providerRaw as GenderProviderName,
   GENDER_CONFIDENCE_THRESHOLD: float("GENDER_CONFIDENCE_THRESHOLD", 0.75, 0, 1),

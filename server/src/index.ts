@@ -17,6 +17,7 @@ import authRoutes from "./routes/auth";
 import userRoutes from "./routes/user";
 import reportRoutes from "./routes/report";
 import premiumRoutes from "./routes/premium";
+import coinRoutes from "./routes/coins";
 import rtcRoutes from "./routes/rtc";
 import metaRoutes from "./routes/meta";
 
@@ -116,6 +117,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/report", reportRoutes);
 app.use("/api/premium", premiumRoutes);
+app.use("/api/coins", coinRoutes);
 app.use("/api/rtc", rtcRoutes);
 app.use("/api/meta", metaRoutes);
 
