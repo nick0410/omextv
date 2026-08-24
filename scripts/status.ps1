@@ -10,6 +10,24 @@
 $ErrorActionPreference = 'Continue'
 $bad = 0
 
+# Read the published config, whichever way it comes back.
+#
+# Invoke-RestMethod parses JSON only when the content type says so, and
+# raw.githubusercontent serves .json as text/plain — but not every PowerShell
+# version agrees, so this returns a string on one host and a parsed object on
+# another. Handling only one of those is how the check ends up failing on a
+# perfectly good config: as a raw string every property reads empty, and as an
+# object TrimStart does not exist.
+#
+# The BOM strip matters for the string case: copies published before
+# tunnel.ps1 stopped writing one still carry it, and a strict parser rejects it.
+function Read-PublishedConfig($url) {
+  $body = Invoke-RestMethod $url -TimeoutSec 20
+  if ($body -is [string]) { return $body.TrimStart([char]0xFEFF) | ConvertFrom-Json }
+  return $body
+}
+
+
 function Probe($label, $block) {
   try {
     $detail = & $block
@@ -90,14 +108,7 @@ if ($url) {
   # authority, so ask it.
   Probe 'published config' {
     $raw = 'https://raw.githubusercontent.com/nick0410/omextv/main/runtime-config.json'
-    # ConvertFrom-Json explicitly: raw.githubusercontent.com serves .json as
-    # text/plain, and Invoke-RestMethod only parses when the content type says
-    # JSON. Left to itself it hands back the raw string, every property reads
-    # as empty, and the comparison below fails no matter what was published.
-    $body = Invoke-RestMethod "${raw}?t=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())" -TimeoutSec 20
-    # TrimStart the BOM: copies published before tunnel.ps1 stopped writing
-    # one still carry it, and it is not valid JSON to a strict parser.
-    $doc = $body.TrimStart([char]0xFEFF) | ConvertFrom-Json
+    $doc = Read-PublishedConfig "${raw}?t=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
     if ($doc.apiUrl -ne $url) {
       # raw.githubusercontent.com leaves the query string out of its cache key,
       # so for up to five minutes after a tunnel restart this genuinely still

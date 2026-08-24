@@ -138,10 +138,37 @@ for (;;) {
   $lastRestart = [DateTime]::UtcNow
   $failures = 0
   try {
-    & powershell -File (Join-Path $PSScriptRoot 'tunnel.ps1') 2>&1 |
-      ForEach-Object { Say "  tunnel.ps1: $_" }
-    $fresh = Get-TunnelUrl
-    Say "tunnel is now $fresh" 'Green'
+    # Run it as a separate process and wait on the process, not on its output.
+    #
+    # Piping tunnel.ps1's output into ForEach-Object hung the watchdog forever
+    # the first time it restarted anything. tunnel.ps1 launches cloudflared,
+    # cloudflared inherits the output handles, and the pipeline only closes
+    # when every holder of those handles exits — so the loop sat waiting on a
+    # stream the long-lived tunnel was holding open. It was still doing that
+    # fifteen hours later, having stopped checking anything at all: a watchdog
+    # that works exactly once is worse than none, because the log looks calm.
+    #
+    # Redirecting to files and waiting on the process handle sidesteps it, and
+    # the timeout means even a wedged tunnel.ps1 cannot stop the loop.
+    $out = Join-Path $env:TEMP 'omextv-tunnel-restart.log'
+    $proc = Start-Process powershell `
+      -ArgumentList '-File', (Join-Path $PSScriptRoot 'tunnel.ps1') `
+      -WindowStyle Hidden -PassThru `
+      -RedirectStandardOutput $out -RedirectStandardError "$out.err"
+
+    if (-not $proc.WaitForExit(300000)) {
+      $proc.Kill()
+      Say 'tunnel.ps1 did not finish in five minutes; gave up on it' 'Red'
+    } else {
+      foreach ($file in @($out, "$out.err")) {
+        if (Test-Path $file) {
+          Get-Content $file | Where-Object { $_ -match '\S' } |
+            ForEach-Object { Say "  tunnel.ps1: $_" }
+        }
+      }
+      $fresh = Get-TunnelUrl
+      Say "tunnel is now $fresh" 'Green'
+    }
   } catch {
     Say "restart failed: $($_.Exception.Message)" 'Red'
   }

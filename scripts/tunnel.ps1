@@ -14,6 +14,24 @@
 
 $ErrorActionPreference = 'Stop'
 
+# Read the published config, whichever way it comes back.
+#
+# Invoke-RestMethod parses JSON only when the content type says so, and
+# raw.githubusercontent serves .json as text/plain — but not every PowerShell
+# version agrees, so this returns a string on one host and a parsed object on
+# another. Handling only one of those is how the check ends up failing on a
+# perfectly good config: as a raw string every property reads empty, and as an
+# object TrimStart does not exist.
+#
+# The BOM strip matters for the string case: copies published before
+# tunnel.ps1 stopped writing one still carry it, and a strict parser rejects it.
+function Read-PublishedConfig($url) {
+  $body = Invoke-RestMethod $url -TimeoutSec 20
+  if ($body -is [string]) { return $body.TrimStart([char]0xFEFF) | ConvertFrom-Json }
+  return $body
+}
+
+
 # cloudflared may be on PATH, installed by winget, or just a downloaded exe
 # sitting in a folder — check all three rather than assuming one.
 $candidates = @(
@@ -130,13 +148,12 @@ $published = $false
 foreach ($i in 1..10) {
   Start-Sleep -Seconds 3
   try {
-    # ConvertFrom-Json explicitly — see status.ps1. Without it this compared
-    # a property of a plain string against $url, which is never equal, so the
-    # loop always ran out and always warned that publishing had not caught up.
-    # A warning that fires every single time is one nobody can act on, and it
-    # would have hidden a push that genuinely failed.
-    $body = Invoke-RestMethod "${raw}?t=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())" -TimeoutSec 15
-    $doc = $body.TrimStart([char]0xFEFF) | ConvertFrom-Json
+    # Without the parse this compared a property of a plain string against
+    # $url, which is never equal — so the loop always ran out and always warned
+    # that publishing had not caught up, including on every successful run. A
+    # warning that fires every time is one nobody can act on, and it would have
+    # hidden a push that genuinely failed.
+    $doc = Read-PublishedConfig "${raw}?t=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
     if ($doc.apiUrl -eq $url) { $published = $true; break }
   } catch { }
 }
