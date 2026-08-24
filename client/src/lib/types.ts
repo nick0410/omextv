@@ -130,3 +130,59 @@ export const OUTCOME_COPY: Record<VerificationOutcome, string> = {
   provider_unavailable: "Verification is unavailable right now.",
   user_not_found: "Account not found. Try signing in again.",
 };
+
+// --- Coins and premium -----------------------------------------------------
+
+/** Rupees to coins. Priced by the server; the client never computes a price. */
+export interface CoinPack {
+  id: string;
+  name: string;
+  amountPaise: number;
+  coins: number;
+  bonusCoins: number;
+  best?: boolean;
+}
+
+/** Coins to premium days. */
+export interface CoinPass {
+  id: string;
+  name: string;
+  cost: number;
+  days: number;
+}
+
+export type CoinOrderStatus =
+  | "awaiting_payment"
+  | "under_review"
+  | "approved"
+  | "rejected";
+
+export interface CoinOrder {
+  id: string;
+  packId: string;
+  coins: number;
+  amountPaise: number;
+  status: CoinOrderStatus;
+  upiRef: string | null;
+  note: string | null;
+  createdAt: string;
+}
+
+/** Everything needed to render a payable QR, built by the server. */
+export interface UpiRequest {
+  link: string;
+  payeeVpa: string;
+  payeeName: string;
+  amountRupees: string;
+  reference: string;
+}
+
+export interface Wallet {
+  coins: number;
+  isPremium: boolean;
+  premiumExpiry: string | null;
+  packs: CoinPack[];
+  passes: CoinPass[];
+  /** False when no payee is configured — the client hides buying entirely. */
+  upiEnabled: boolean;
+}

@@ -82,6 +82,15 @@ export interface CallState {
   isCameraOff: boolean;
   hasTurn: boolean;
   waitedMs: number;
+  /**
+   * Filters the server refused to apply, because they are premium-only.
+   *
+   * Not an error: the search went ahead, just without them. Reporting it as a
+   * failure would stop a free user from matching at all, and saying nothing
+   * would leave them watching strangers arrive from every country they thought
+   * they had excluded.
+   */
+  restrictedFilters: Array<"gender" | "country">;
 }
 
 export function useCall() {
@@ -93,6 +102,7 @@ export function useCall() {
   const [queueSize, setQueueSize] = useState(0);
   const [onlineCount, setOnlineCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [restrictedFilters, setRestrictedFilters] = useState<Array<"gender" | "country">>([]);
   const [partnerTyping, setPartnerTyping] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOff, setIsCameraOff] = useState(false);
@@ -251,6 +261,10 @@ export function useCall() {
       setPhase("idle");
     };
 
+    const onFiltersRestricted = (data: { dropped?: Array<"gender" | "country"> }) => {
+      setRestrictedFilters(Array.isArray(data?.dropped) ? data.dropped : []);
+    };
+
     const onQueueRequeued = (data: { position: number }) => {
       setQueuePosition(data.position);
       setPhase("queued");
@@ -349,6 +363,7 @@ export function useCall() {
     socket.on("queue-joined", onQueueJoined);
     socket.on("queue-status", onQueueStatus);
     socket.on("queue-error", onQueueError);
+    socket.on("filters-restricted", onFiltersRestricted);
     socket.on("queue-requeued", onQueueRequeued);
     socket.on("match-found", onMatchFound);
     socket.on("offer", onOffer);
@@ -367,6 +382,7 @@ export function useCall() {
       socket.off("queue-joined", onQueueJoined);
       socket.off("queue-status", onQueueStatus);
       socket.off("queue-error", onQueueError);
+      socket.off("filters-restricted", onFiltersRestricted);
       socket.off("queue-requeued", onQueueRequeued);
       socket.off("match-found", onMatchFound);
       socket.off("offer", onOffer);
@@ -494,6 +510,7 @@ export function useCall() {
       isCameraOff,
       hasTurn,
       waitedMs,
+      restrictedFilters,
     } as CallState,
     localStream,
     remoteStream,

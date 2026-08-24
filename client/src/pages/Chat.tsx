@@ -7,6 +7,7 @@ import { ControlBar } from "../components/ControlBar";
 import { ChatPanel } from "../components/ChatPanel";
 import { FilterPanel } from "../components/FilterPanel";
 import { ActiveFilters } from "../components/ActiveFilters";
+import { premiumIsActive } from "../hooks/useWallet";
 import { useOnlineCountries } from "../hooks/useOnlineCountries";
 import { ReportModal } from "../components/ReportModal";
 import { Logo } from "../components/Logo";
@@ -59,6 +60,15 @@ function CallTimer() {
 
 export default function Chat() {
   const user = useAuthStore((s) => s.user);
+  /*
+   * Read from the expiry, not the stored flag.
+   *
+   * `isPremium` stays true after a pass lapses until something writes it back,
+   * so trusting it alone would leave the filters looking unlocked while the
+   * server quietly ignored them — the user picks "Women", meets everyone, and
+   * concludes the app is broken rather than that they need to top up.
+   */
+  const isPremium = premiumIsActive(user);
   const logout = useAuthStore((s) => s.logout);
   const [filters, setFilters] = useState<MatchFilters>(loadFilters);
   const [showReport, setShowReport] = useState(false);
@@ -149,6 +159,23 @@ export default function Chat() {
               {state.onlineCount}
             </span>
 
+            {/*
+              * The way in to the store, and the only place premium is visible
+              * before someone hits a locked filter. A premium account sees a
+              * plain badge instead — nothing to buy, so nothing to sell.
+              */}
+            <Link
+              to="/coins"
+              className={`flex min-h-11 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium transition-colors ${
+                isPremium
+                  ? "text-emerald-700 hover:bg-emerald-500/10"
+                  : "text-brand-600 hover:bg-brand-500/10"
+              }`}
+            >
+              <span aria-hidden="true">{isPremium ? "✦" : "◎"}</span>
+              <span className="hidden sm:inline">{isPremium ? "Premium" : "Coins"}</span>
+            </Link>
+
             <span className="hidden text-sm font-medium text-ink-700 sm:inline">
               {user?.username}
             </span>
@@ -203,6 +230,7 @@ export default function Chat() {
             filters={filters}
             online={onlineCountries}
             queued={state.phase === "queued"}
+            restricted={state.restrictedFilters}
             onClearAll={() => {
               // Also stop the detected-gender default from re-applying itself.
               setSuggestionApplied(true);
@@ -292,6 +320,7 @@ export default function Chat() {
               onChange={setFilters}
               disabled={filtersLocked}
               suggested={suggestion === "any" ? null : suggestion}
+              isPremium={isPremium}
             />
           )}
         </aside>

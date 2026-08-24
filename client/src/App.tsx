@@ -6,6 +6,8 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Chat from "./pages/Chat";
 import Diagnostics from "./pages/Diagnostics";
+import Coins from "./pages/Coins";
+import Review from "./pages/Review";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
@@ -26,6 +28,27 @@ export default function App() {
           element={
             <RequireAuth>
               <Chat />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/coins"
+          element={
+            <RequireAuth>
+              <Coins />
+            </RequireAuth>
+          }
+        />
+        {/*
+          * Guarded by the server, not by this route. Anyone may load the page;
+          * the API refuses every request from an account that is not listed in
+          * ADMIN_EMAILS, and the page says so plainly.
+          */}
+        <Route
+          path="/review"
+          element={
+            <RequireAuth>
+              <Review />
             </RequireAuth>
           }
         />
