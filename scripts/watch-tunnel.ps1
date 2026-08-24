@@ -47,9 +47,20 @@ function Say($message, $colour = 'Gray') {
   Add-Content -Path $log -Value $line
 }
 
+  # Matching several hyphenated words, not just any trycloudflare host.
+#
+  # When cloudflared cannot start it prints the failure, and the failure names
+  # its own endpoint: "failed to request quick Tunnel: Post
+  # https://api.trycloudflare.com/tunnel". The looser pattern matched that, so a
+  # tunnel that never existed was scraped out of an error message and published
+  # as the live API — and because api.trycloudflare.com answers 200, every check
+  # downstream agreed the site was healthy while it pointed at Cloudflare.
+#
+  # Quick tunnel names are always several words joined by hyphens, so requiring
+  # three of them rules the endpoint out.
 function Get-TunnelUrl {
   if (-not (Test-Path $TunnelLog)) { return $null }
-  $m = Select-String -Path $TunnelLog -Pattern 'https://[a-z0-9-]+\.trycloudflare\.com' |
+  $m = Select-String -Path $TunnelLog -Pattern 'https://[a-z0-9]+(?:-[a-z0-9]+){2,}\.trycloudflare\.com' |
     Select-Object -First 1
   if ($m) { return $m.Matches[0].Value }
   return $null

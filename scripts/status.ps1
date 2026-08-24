@@ -67,7 +67,7 @@ Probe 'gender model' {
 $log = Join-Path $env:TEMP 'omextv-tunnel.log'
 $url = $null
 if (Test-Path $log) {
-  $m = Select-String -Path $log -Pattern 'https://[a-z0-9-]+\.trycloudflare\.com' | Select-Object -First 1
+  $m = Select-String -Path $log -Pattern 'https://[a-z0-9]+(?:-[a-z0-9]+){2,}\.trycloudflare\.com' | Select-Object -First 1
   if ($m) { $url = $m.Matches[0].Value }
 }
 

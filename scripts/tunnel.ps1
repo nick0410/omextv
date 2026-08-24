@@ -61,15 +61,36 @@ Start-Process -FilePath $exe `
   -ArgumentList 'tunnel', '--url', 'http://localhost:3001', '--protocol', 'http2', '--no-autoupdate' `
   -RedirectStandardError $log -WindowStyle Hidden
 
+# Matching several hyphenated words, not just any trycloudflare host.
+#
+# When cloudflared cannot start it prints the failure, and the failure names
+# its own endpoint: "failed to request quick Tunnel: Post
+# https://api.trycloudflare.com/tunnel". The looser pattern matched that, so a
+# tunnel that never existed was scraped out of an error message and published
+# as the live API — and because api.trycloudflare.com answers 200, every check
+# downstream agreed the site was healthy while it pointed at Cloudflare.
+#
+# Quick tunnel names are always several words joined by hyphens, so requiring
+# three of them rules the endpoint out.
 Write-Host 'Waiting for the tunnel hostname...'
 $url = $null
 foreach ($i in 1..30) {
   Start-Sleep -Seconds 2
-  $match = Select-String -Path $log -Pattern 'https://[a-z0-9-]+\.trycloudflare\.com' -ErrorAction SilentlyContinue |
+  $match = Select-String -Path $log -Pattern 'https://[a-z0-9]+(?:-[a-z0-9]+){2,}\.trycloudflare\.com' -ErrorAction SilentlyContinue |
     Select-Object -First 1
   if ($match) { $url = $match.Matches[0].Value; break }
 }
 if (-not $url) { throw "Tunnel did not come up. See $log" }
+
+# And make sure the process that owns it is still there.
+#
+# Finding a hostname is not the same as having a tunnel: cloudflared can print
+# one and then exit, and publishing at that point points the live site at
+# something that will never answer. Checked before anything is published,
+# because the published document is what every visitor reads.
+if (-not (Get-Process cloudflared -ErrorAction SilentlyContinue)) {
+  throw "cloudflared exited after starting. See $log"
+}
 
 Write-Host "Tunnel: $url"
 
