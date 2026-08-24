@@ -73,23 +73,23 @@ async function main() {
   check("catalogue is served", Array.isArray(me.packs) && me.packs.length > 0);
   check("a new account starts with nothing", me.coins === 0 && me.isPremium === false);
 
-  if (!me.upiEnabled) {
+  if (!me.purchasesEnabled) {
     console.log("\n  SKIP  UPI is not configured. Set UPI_ID in server/.env.\n");
     process.exit(0);
   }
 
   const created = await post("/api/coins/orders", { packId: "starter" }, buyer.token);
-  const { order, upi } = await created.json();
+  const { order, payment } = await created.json();
   check("order created", created.status === 201, `HTTP ${created.status}`);
   // The single most expensive thing to get wrong: money to the wrong account.
-  check("the payee is the one in .env", Boolean(upi.payeeVpa), upi.payeeVpa);
-  check("the amount matches the pack", upi.amountRupees === "500.00", upi.amountRupees);
-  check("the link is a upi:// request", upi.link.startsWith("upi://pay?"));
-  check("the order reference travels with it", upi.link.includes(`tr=${upi.reference}`));
+  check("the payee is the one in .env", Boolean(payment.payee), payment.payee);
+  check("the amount matches the pack", payment.amountRupees === "500.00", payment.amountRupees);
+  check("the link is a upi:// request", payment.link.startsWith("upi://pay?"));
+  check("the order reference travels with it", payment.link.includes(`tr=${payment.reference}`));
 
   const submitted = await post(
     `/api/coins/orders/${order.id}/reference`,
-    { upiRef: `CHECK${stamp}` },
+    { paymentRef: `CHECK${stamp}` },
     buyer.token,
   );
   check("a reference is accepted", submitted.status === 200, `HTTP ${submitted.status}`);

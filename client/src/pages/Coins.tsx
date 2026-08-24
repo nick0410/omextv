@@ -4,7 +4,7 @@ import QRCode from "qrcode";
 import api from "../lib/axios";
 import { useWallet } from "../hooks/useWallet";
 import { useAuthStore } from "../store/authStore";
-import type { CoinOrder, CoinPack, CoinPass, UpiRequest } from "../lib/types";
+import type { CoinOrder, CoinPack, CoinPass, PaymentInstruction } from "../lib/types";
 
 /**
  * Buying coins, and turning them into premium.
@@ -35,7 +35,7 @@ export default function Coins() {
   const { wallet, loading, error, refresh } = useWallet();
   const fetchMe = useAuthStore((s) => s.fetchMe);
   const [orders, setOrders] = useState<CoinOrder[]>([]);
-  const [checkout, setCheckout] = useState<{ order: CoinOrder; upi: UpiRequest } | null>(null);
+  const [checkout, setCheckout] = useState<{ order: CoinOrder; payment: PaymentInstruction } | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -57,7 +57,7 @@ export default function Coins() {
     setBusy(true);
     setProblem(null);
     try {
-      const res = await api.post<{ order: CoinOrder; upi: UpiRequest }>("/coins/orders", {
+      const res = await api.post<{ order: CoinOrder; payment: PaymentInstruction }>("/coins/orders", {
         packId: pack.id,
       });
       setCheckout(res.data);
@@ -170,7 +170,7 @@ export default function Coins() {
             </div>
           </Section>
 
-          {wallet.upiEnabled ? (
+          {wallet.purchasesEnabled ? (
             <Section title="Get more coins">
               <div className="grid gap-2.5 sm:grid-cols-3">
                 {wallet.packs.map((pack) => (
@@ -280,13 +280,13 @@ function Checkout({
   onDone,
   onCancel,
 }: {
-  checkout: { order: CoinOrder; upi: UpiRequest };
+  checkout: { order: CoinOrder; payment: PaymentInstruction };
   onDone: () => void;
   onCancel: () => void;
 }) {
-  const { order, upi } = checkout;
+  const { order, payment } = checkout;
   const [qr, setQr] = useState<string | null>(null);
-  const [upiRef, setUpiRef] = useState("");
+  const [reference, setReference] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
@@ -295,7 +295,7 @@ function Checkout({
     // Drawn from the same link the button opens, so the QR cannot drift from
     // the amount and reference the server recorded.
     let alive = true;
-    QRCode.toDataURL(upi.link, { width: 320, margin: 1 })
+    QRCode.toDataURL(payment.link, { width: 320, margin: 1 })
       .then((url) => {
         if (alive) setQr(url);
       })
@@ -306,13 +306,13 @@ function Checkout({
     return () => {
       alive = false;
     };
-  }, [upi.link]);
+  }, [payment.link]);
 
   const submit = async () => {
     setBusy(true);
     setProblem(null);
     try {
-      await api.post(`/coins/orders/${order.id}/reference`, { upiRef: upiRef.trim() });
+      await api.post(`/coins/orders/${order.id}/reference`, { paymentRef: reference.trim() });
       setSubmitted(true);
     } catch (err) {
       setProblem(errorFrom(err, "Could not submit that reference."));
@@ -352,7 +352,7 @@ function Checkout({
   return (
     <div className="rounded-2xl bg-white p-5 ring-1 ring-ink-200">
       <h2 className="text-lg font-semibold text-ink-900">
-        Pay ₹{upi.amountRupees} for {order.coins.toLocaleString("en-IN")} coins
+        Pay ₹{payment.amountRupees} for {order.coins.toLocaleString("en-IN")} coins
       </h2>
 
       <div className="mt-4 flex flex-col gap-5 sm:flex-row sm:items-start">
@@ -360,7 +360,7 @@ function Checkout({
           {qr ? (
             <img
               src={qr}
-              alt={`UPI QR code to pay ₹${upi.amountRupees} to ${upi.payeeVpa}`}
+              alt={`UPI QR code to pay ₹${payment.amountRupees} to ${payment.payee}`}
               className="h-44 w-44 rounded-xl ring-1 ring-ink-200"
             />
           ) : (
@@ -372,26 +372,26 @@ function Checkout({
 
         <div className="min-w-0 flex-1 text-sm">
           <p className="text-ink-600">Scan with any UPI app, or pay this ID:</p>
-          <p className="mt-1 break-all font-medium text-ink-900">{upi.payeeVpa}</p>
-          <p className="mt-0.5 text-ink-500">{upi.payeeName}</p>
+          <p className="mt-1 break-all font-medium text-ink-900">{payment.payee}</p>
+          <p className="mt-0.5 text-ink-500">{payment.payeeName}</p>
 
           {/* On a phone this opens the UPI app with everything filled in. */}
           <a
-            href={upi.link}
+            href={payment.link}
             className="mt-3 inline-flex min-h-11 items-center rounded-xl bg-brand-500 px-4 font-medium text-white hover:bg-brand-600 sm:hidden"
           >
             Open UPI app
           </a>
 
           <p className="mt-3 text-xs leading-relaxed text-ink-400">
-            Add the note <span className="font-medium text-ink-600">{upi.reference}</span> if your
+            Add the note <span className="font-medium text-ink-600">{payment.reference}</span> if your
             app lets you. It is how we find your payment.
           </p>
         </div>
       </div>
 
       <div className="mt-5 border-t border-ink-100 pt-5">
-        <label htmlFor="upiRef" className="block text-sm font-medium text-ink-900">
+        <label htmlFor="paymentRef" className="block text-sm font-medium text-ink-900">
           Paid? Enter the UPI reference
         </label>
         <p className="mt-1 text-xs leading-relaxed text-ink-500">
@@ -401,9 +401,9 @@ function Checkout({
         </p>
         <div className="mt-2.5 flex flex-wrap gap-2">
           <input
-            id="upiRef"
-            value={upiRef}
-            onChange={(e) => setUpiRef(e.target.value)}
+            id="paymentRef"
+            value={reference}
+            onChange={(e) => setReference(e.target.value)}
             placeholder="e.g. 412345678901"
             inputMode="text"
             autoComplete="off"
@@ -412,7 +412,7 @@ function Checkout({
           <button
             type="button"
             onClick={submit}
-            disabled={busy || upiRef.trim().length < 6}
+            disabled={busy || reference.trim().length < 6}
             className="min-h-11 rounded-xl bg-brand-500 px-4 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
           >
             Submit

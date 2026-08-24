@@ -163,15 +163,23 @@ export interface CoinOrder {
   coins: number;
   amountPaise: number;
   status: CoinOrderStatus;
-  upiRef: string | null;
+  paymentRef: string | null;
   note: string | null;
   createdAt: string;
 }
 
-/** Everything needed to render a payable QR, built by the server. */
-export interface UpiRequest {
+/**
+ * Everything needed to render a payable QR, built by the server.
+ *
+ * Named for what it is rather than for UPI: the server picks the payment
+ * provider, and a client that hard-codes one in its type names has to be
+ * rewritten to accept a second.
+ */
+export interface PaymentInstruction {
+  /** Which provider produced this — "upi" today. */
+  kind: string;
   link: string;
-  payeeVpa: string;
+  payee: string;
   payeeName: string;
   amountRupees: string;
   reference: string;
@@ -184,5 +192,5 @@ export interface Wallet {
   packs: CoinPack[];
   passes: CoinPass[];
   /** False when no payee is configured — the client hides buying entirely. */
-  upiEnabled: boolean;
+  purchasesEnabled: boolean;
 }

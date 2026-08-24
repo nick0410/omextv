@@ -1,15 +1,23 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "../config/database";
 import { isDbReady } from "./dbAvailable";
-import { balanceOf, credit, creditIn, debit, extendFrom } from "../services/coins/wallet";
+import { createPrismaCoinStore } from "../services/coins/adapters/prisma";
 
 /**
  * The balance, under the conditions that actually break balances.
  *
  * Single-threaded arithmetic is not where coin systems go wrong — concurrency
- * is. Every test that matters here fires two requests at once and checks that
- * exactly one of them won.
+ * is. Every test that matters here fires several requests at once and checks
+ * that exactly the right number of them won.
+ *
+ * Pointed at the Postgres adapter rather than at the service, deliberately.
+ * The guarantee under test is the conditional write itself, and the in-memory
+ * backing cannot demonstrate it: nothing interleaves there. The service's own
+ * rules are covered without a database in coinService.test.ts.
  */
+
+const store = createPrismaCoinStore();
+const wallet = store.wallet;
 
 const suite = isDbReady() ? describe : describe.skip;
 const PREFIX = `wtest_${Date.now()}_`;
@@ -46,7 +54,7 @@ suite("coin wallet", () => {
 
   it("credits and records the balance it produced", async () => {
     const id = await makeUser();
-    const { balance } = await credit(id, 500, { reason: "purchase", refId: "o1" });
+    const balance = await wallet.credit(id, 500, "purchase", "o1");
 
     expect(balance).toBe(500);
     const entries = await prisma.coinLedger.findMany({ where: { userId: id } });
@@ -57,18 +65,15 @@ suite("coin wallet", () => {
 
   it("debits down to exactly zero", async () => {
     const id = await makeUser(500);
-    const result = await debit(id, 500, { reason: "pass", refId: "month" });
-
-    expect(result?.balance).toBe(0);
-    expect(await balanceOf(id)).toBe(0);
+    expect(await wallet.debit(id, 500, "pass", "month")).toBe(0);
+    expect(await wallet.balanceOf(id)).toBe(0);
   });
 
   it("refuses to overdraw, and changes nothing when it does", async () => {
     const id = await makeUser(100);
-    const result = await debit(id, 101, { reason: "pass" });
 
-    expect(result).toBeNull();
-    expect(await balanceOf(id)).toBe(100);
+    expect(await wallet.debit(id, 101, "pass")).toBeNull();
+    expect(await wallet.balanceOf(id)).toBe(100);
     // A declined spend must not leave a ledger row either, or the history
     // stops adding up to the balance.
     expect(await prisma.coinLedger.count({ where: { userId: id } })).toBe(0);
@@ -80,14 +85,13 @@ suite("coin wallet", () => {
     // grant a pass off one payment.
     const id = await makeUser(500);
 
-    const [a, b] = await Promise.all([
-      debit(id, 500, { reason: "pass", refId: "month" }),
-      debit(id, 500, { reason: "pass", refId: "month" }),
+    const results = await Promise.all([
+      wallet.debit(id, 500, "pass", "month"),
+      wallet.debit(id, 500, "pass", "month"),
     ]);
 
-    const winners = [a, b].filter(Boolean);
-    expect(winners).toHaveLength(1);
-    expect(await balanceOf(id)).toBe(0);
+    expect(results.filter((r) => r !== null)).toHaveLength(1);
+    expect(await wallet.balanceOf(id)).toBe(0);
     expect(await prisma.coinLedger.count({ where: { userId: id } })).toBe(1);
   });
 
@@ -95,12 +99,11 @@ suite("coin wallet", () => {
     const id = await makeUser(1000);
 
     const results = await Promise.all(
-      Array.from({ length: 20 }, () => debit(id, 100, { reason: "pass" })),
+      Array.from({ length: 20 }, () => wallet.debit(id, 100, "pass")),
     );
 
-    const succeeded = results.filter(Boolean).length;
-    expect(succeeded).toBe(10);
-    expect(await balanceOf(id)).toBe(0);
+    expect(results.filter((r) => r !== null)).toHaveLength(10);
+    expect(await wallet.balanceOf(id)).toBe(0);
 
     // Every ledger row should agree with the balance at the time it was
     // written, so the history can be replayed.
@@ -117,44 +120,59 @@ suite("coin wallet", () => {
 
     // A negative "credit" would drain a balance while the ledger recorded a
     // purchase — the shape of a bug that reads as theft.
-    await expect(credit(id, -50, { reason: "purchase" })).rejects.toThrow();
-    await expect(credit(id, 0, { reason: "purchase" })).rejects.toThrow();
-    await expect(debit(id, 1.5, { reason: "pass" })).rejects.toThrow();
-    expect(await balanceOf(id)).toBe(100);
+    await expect(wallet.credit(id, -50, "purchase")).rejects.toThrow();
+    await expect(wallet.credit(id, 0, "purchase")).rejects.toThrow();
+    await expect(wallet.debit(id, 1.5, "pass")).rejects.toThrow();
+    expect(await wallet.balanceOf(id)).toBe(100);
   });
 
-  it("rolls the credit back if the ledger write fails", async () => {
+  it("rolls the whole unit of work back when part of it fails", async () => {
     const id = await makeUser(100);
 
-    // reason is constrained by the caller, not the column, so force a failure
-    // the transaction has to undo: a ledger row for a user that is not there.
+    // Credit one real account and one that does not exist. The transaction has
+    // to undo the first, or an approval that half-failed leaves coins behind.
     await expect(
-      prisma.$transaction(async (tx) => {
-        await creditIn(tx, id, 500, { reason: "purchase" });
-        await creditIn(tx, "no-such-user", 1, { reason: "purchase" });
+      store.transact(async (repos) => {
+        await repos.wallet.credit(id, 500, "purchase");
+        await repos.wallet.credit("no-such-user", 1, "purchase");
       }),
     ).rejects.toThrow();
 
-    expect(await balanceOf(id)).toBe(100);
-  });
-});
-
-describe("premium expiry arithmetic", () => {
-  const now = new Date("2026-01-10T00:00:00Z");
-
-  it("starts from now when there is no pass", () => {
-    expect(extendFrom(null, 30, now).toISOString()).toBe("2026-02-09T00:00:00.000Z");
+    expect(await wallet.balanceOf(id)).toBe(100);
+    expect(await prisma.coinLedger.count({ where: { userId: id } })).toBe(0);
   });
 
-  it("starts from now when the old pass already lapsed", () => {
-    const lapsed = new Date("2026-01-01T00:00:00Z");
-    expect(extendFrom(lapsed, 30, now).toISOString()).toBe("2026-02-09T00:00:00.000Z");
+  it("claims an order exactly once when two callers race", async () => {
+    // The same guarantee as the balance floor, applied to a status change:
+    // this is what stops a double-clicked approval crediting twice.
+    const id = await makeUser();
+    const order = await store.orders.create({
+      userId: id,
+      packId: "starter",
+      coins: 500,
+      amountPaise: 50_000,
+    });
+    await store.orders.attachReference(order.id, `R${Date.now()}`);
+
+    const claims = await Promise.all([
+      store.orders.claim(order.id, "under_review", "approved"),
+      store.orders.claim(order.id, "under_review", "approved"),
+    ]);
+
+    expect(claims.filter(Boolean)).toHaveLength(1);
   });
 
-  it("stacks on top of a pass that is still running", () => {
-    // Topping up early must not burn the remaining days — otherwise renewing
-    // a week ahead costs you that week.
-    const running = new Date("2026-01-20T00:00:00Z");
-    expect(extendFrom(running, 30, now).toISOString()).toBe("2026-02-19T00:00:00.000Z");
+  it("will not let two orders hold the same payment reference", async () => {
+    const id = await makeUser();
+    const ref = `DUP${Date.now()}`;
+    const first = await store.orders.create({
+      userId: id, packId: "starter", coins: 500, amountPaise: 50_000,
+    });
+    const second = await store.orders.create({
+      userId: id, packId: "starter", coins: 500, amountPaise: 50_000,
+    });
+
+    expect(await store.orders.attachReference(first.id, ref)).toBe("ok");
+    expect(await store.orders.attachReference(second.id, ref)).toBe("duplicate");
   });
 });

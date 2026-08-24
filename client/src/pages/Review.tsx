@@ -20,7 +20,7 @@ interface ReviewOrder {
   coins: number;
   amountPaise: number;
   status: string;
-  upiRef: string | null;
+  paymentRef: string | null;
   note: string | null;
   createdAt: string;
   username: string;
@@ -129,9 +129,9 @@ export default function Review() {
 
             {/* The number to search the bank statement for. */}
             <div className="mt-2.5 rounded-lg bg-ink-100 px-3 py-2">
-              <div className="text-xs uppercase tracking-wide text-ink-400">UPI reference</div>
+              <div className="text-xs uppercase tracking-wide text-ink-400">Payment reference</div>
               <div className="select-all break-all font-mono text-sm text-ink-900">
-                {order.upiRef ?? "—"}
+                {order.paymentRef ?? "—"}
               </div>
             </div>
 
