@@ -58,6 +58,7 @@ export type ReferenceError =
   | "wrong_state"
   | "duplicate_reference";
 export type RedeemError = "unknown_pass" | "insufficient_coins";
+export type ReopenError = "not_found" | "wrong_state" | "payments_unavailable";
 export type ReviewError = "not_awaiting_review";
 
 export class CoinService {
@@ -84,6 +85,20 @@ export class CoinService {
       passes: COIN_PASSES,
       purchasesEnabled: this.payments.isConfigured(),
     };
+  }
+
+  /**
+   * Is premium in force for this account right now?
+   *
+   * Asked at the moment it is used, not remembered. A socket authenticates
+   * once and can live for hours: a pass bought during that session, or one
+   * that lapsed during it, would otherwise not take effect until the user
+   * happened to reconnect. Someone paying and finding the filters still locked
+   * is the worst failure this feature has.
+   */
+  async isPremiumNow(userId: string): Promise<boolean> {
+    const premium = await this.repos.premium.get(userId);
+    return premium ? this.premiumIsLive(premium) : false;
   }
 
   ordersFor(userId: string): Promise<CoinOrderRecord[]> {
@@ -173,16 +188,61 @@ export class CoinService {
     return updated ? ok(updated) : err("not_found", "Order not found.");
   }
 
+  /**
+   * Get the payment instruction for an order that was started earlier.
+   *
+   * Without this a buyer who closed the page had no way back to the QR: the
+   * order sat in their list marked unpaid, with nothing to click. They would
+   * start another, hit the open-order cap after five, and be stuck holding
+   * five orders they could neither pay nor abandon.
+   *
+   * Rebuilt rather than stored, so it always reflects the configured payee —
+   * an instruction saved a week ago could name an account that has since
+   * changed.
+   */
+  async reopenOrder(
+    userId: string,
+    orderId: string,
+  ): Promise<Result<Checkout, ReopenError>> {
+    if (!this.payments.isConfigured()) {
+      return err("payments_unavailable", "Payments are not set up yet.");
+    }
+
+    const order = await this.repos.orders.findById(orderId);
+    if (!order || order.userId !== userId) return err("not_found", "Order not found.");
+
+    if (!acceptsReference(order.status)) {
+      return err("wrong_state", `This order is ${describe(order.status)}.`);
+    }
+
+    const pack = findPack(order.packId);
+    return ok({
+      order,
+      payment: this.payments.instructionFor({
+        id: order.id,
+        amountPaise: order.amountPaise,
+        description: `Omextv ${pack?.name ?? "coins"}`,
+      }),
+    });
+  }
+
   async cancelOrder(userId: string, orderId: string): Promise<Result<true, ReferenceError>> {
     const order = await this.repos.orders.findById(orderId);
     if (!order || order.userId !== userId) return err("not_found", "Order not found.");
 
     // Only an order nobody has claimed to have paid. Cancelling one under
-    // review would let a payer hide a transfer that already went through.
+    // review would let a payer hide a transfer that already went through, and
+    // an approved one has already been credited.
     const moved = await this.repos.orders.claim(order.id, "awaiting_payment", "rejected", {
       note: "Cancelled",
     });
-    return moved ? ok(true) : err("wrong_state", "That order cannot be cancelled.");
+    if (!moved) {
+      return err(
+        "wrong_state",
+        `This order is ${describe(order.status)} and cannot be cancelled.`,
+      );
+    }
+    return ok(true);
   }
 
   // --- Review -------------------------------------------------------------

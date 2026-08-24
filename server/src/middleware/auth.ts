@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import { env } from "../config/env";
 import { JWTPayload } from "../types";
 import { prisma } from "../config/database";
+import { asyncRoute } from "../utils/asyncRoute";
 
 declare global {
   namespace Express {
@@ -58,8 +59,12 @@ export function optionalAuth(req: Request, _res: Response, next: NextFunction): 
  * a loop.
  *
  * Runs after `authenticate`, which has already established who is asking.
+ *
+ * Wrapped, because it awaits: a database that is down would otherwise reject
+ * with nobody listening, and the request would hang rather than fail. Failing
+ * closed matters more here than anywhere else in the app.
  */
-export async function requireAdmin(
+export const requireAdmin = asyncRoute(async function requireAdmin(
   req: Request,
   res: Response,
   next: NextFunction,
@@ -87,4 +92,4 @@ export async function requireAdmin(
   }
 
   next();
-}
+});

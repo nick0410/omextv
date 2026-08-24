@@ -955,4 +955,71 @@ describe.skipIf(!isDbReady())("stats", () => {
     await once(socket, "queue-joined");
     expect((await getStats()).queued).toBe(1);
   });
+  it("honours a pass bought after the socket connected", async () => {
+    /*
+     * The worst failure this feature can have: someone pays, picks a gender,
+     * and meets everyone anyway — indistinguishable from the payment not
+     * working. The socket authenticates once and can live for hours, so the
+     * entitlement has to be read at the moment it is used.
+     */
+    const buyer = await makeUser({ gender: "male" });
+    const woman = await makeUser({ gender: "female", isPremium: true });
+
+    const sBuyer = await connect(buyer.token);
+    const sWoman = await connect(woman.token);
+    await Promise.all([once(sBuyer, "connected"), once(sWoman, "connected")]);
+
+    // Free, so the filter is cleared and they are told.
+    const told = once<{ dropped: string[] }>(sBuyer, "filters-restricted");
+    sBuyer.emit("join-queue", { gender: "female" });
+    expect((await told).dropped).toContain("gender");
+    sBuyer.emit("leave-queue");
+    await once(sBuyer, "queue-left");
+
+    // The pass is bought over HTTP; this socket knows nothing about it.
+    await prisma.user.update({
+      where: { id: buyer.id },
+      data: { isPremium: true, premiumExpiry: new Date(Date.now() + 86_400_000) },
+    });
+
+    // Same socket, no reconnect. The filter must now stick.
+    const joined = once(sBuyer, "queue-joined");
+    const stillRestricted = never(sBuyer, "filters-restricted", 600);
+    sBuyer.emit("join-queue", { gender: "female" });
+    await Promise.all([joined, stillRestricted]);
+
+    const matched = once<{ partner: { gender: string } }>(sBuyer, "match-found");
+    sWoman.emit("join-queue", { gender: "male" });
+    expect((await matched).partner.gender).toBe("female");
+  });
+
+  it("stops honouring a pass that lapsed during the session", async () => {
+    // The same read, in the other direction.
+    const lapsing = await makeUser({
+      gender: "male",
+      isPremium: true,
+      bannedUntil: null,
+    });
+    await prisma.user.update({
+      where: { id: lapsing.id },
+      data: { premiumExpiry: new Date(Date.now() + 86_400_000) },
+    });
+
+    const socket = await connect(lapsing.token);
+    await once(socket, "connected");
+
+    socket.emit("join-queue", { gender: "female" });
+    await once(socket, "queue-joined");
+    socket.emit("leave-queue");
+    await once(socket, "queue-left");
+
+    await prisma.user.update({
+      where: { id: lapsing.id },
+      data: { premiumExpiry: new Date(Date.now() - 1000) },
+    });
+
+    const told = once<{ dropped: string[] }>(socket, "filters-restricted");
+    socket.emit("join-queue", { gender: "female" });
+    expect((await told).dropped).toContain("gender");
+  });
 });

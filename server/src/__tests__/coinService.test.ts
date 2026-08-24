@@ -386,3 +386,92 @@ describe("the ledger", () => {
     expect(entries.map((e) => e.balanceAfter)).toEqual([0, 500]);
   });
 });
+
+describe("returning to an order started earlier", () => {
+  /*
+   * The list used to be a dead end. An unpaid order showed a status and
+   * nothing else, so a buyer who closed the page could neither reach the QR
+   * again nor abandon it — and after five such orders the open-order cap
+   * stopped them starting a sixth. Stuck holding five orders they could not
+   * pay and could not drop.
+   */
+  it("rebuilds the payment instruction for an unpaid order", async () => {
+    const created = await service.createOrder(buyer, "starter");
+    if (!created.ok) return;
+
+    const again = await service.reopenOrder(buyer, created.value.order.id);
+
+    expect(again.ok).toBe(true);
+    expect(again.ok && again.value.payment.reference).toBe(created.value.order.id);
+    expect(again.ok && again.value.payment.amountRupees).toBe("500.00");
+  });
+
+  it("reopens a rejected order so a corrected reference can be sent", async () => {
+    const id = await orderAwaitingReview("WRONG12345");
+    await service.rejectOrder(id, reviewer, "No matching payment");
+
+    expect((await service.reopenOrder(buyer, id)).ok).toBe(true);
+  });
+
+  it("will not reopen one that is already being checked", async () => {
+    const id = await orderAwaitingReview();
+    expect(await service.reopenOrder(buyer, id)).toMatchObject({ code: "wrong_state" });
+  });
+
+  it("will not reopen one that was already credited", async () => {
+    const id = await orderAwaitingReview();
+    await service.approveOrder(id, reviewer);
+
+    expect(await service.reopenOrder(buyer, id)).toMatchObject({ code: "wrong_state" });
+  });
+
+  it("will not hand somebody else's order back", async () => {
+    const stranger = store.addUser();
+    const created = await service.createOrder(buyer, "starter");
+    if (!created.ok) return;
+
+    expect(await service.reopenOrder(stranger, created.value.order.id)).toMatchObject({
+      code: "not_found",
+    });
+  });
+
+  it("rebuilds from the payee configured now, not the one saved then", async () => {
+    // An instruction stored a week ago could name an account that has since
+    // changed, and the buyer would pay the wrong one.
+    const created = await service.createOrder(buyer, "starter");
+    if (!created.ok) return;
+
+    provider.configured = false;
+    expect(await service.reopenOrder(buyer, created.value.order.id)).toMatchObject({
+      code: "payments_unavailable",
+    });
+  });
+});
+
+describe("knowing whether premium is live", () => {
+  it("is false for an account that never bought one", async () => {
+    expect(await service.isPremiumNow(buyer)).toBe(false);
+  });
+
+  it("is true while the pass is running", async () => {
+    const live = store.addUser({
+      isPremium: true,
+      premiumExpiry: new Date("2026-03-15T00:00:00Z"),
+    });
+    expect(await service.isPremiumNow(live)).toBe(true);
+  });
+
+  it("is false once it has lapsed, whatever the flag says", async () => {
+    // The socket asks this on every join, so a pass that ran out mid-session
+    // stops applying without waiting for a reconnect.
+    const lapsed = store.addUser({
+      isPremium: true,
+      premiumExpiry: new Date("2026-02-01T00:00:00Z"),
+    });
+    expect(await service.isPremiumNow(lapsed)).toBe(false);
+  });
+
+  it("is false for an account that does not exist", async () => {
+    expect(await service.isPremiumNow("nobody")).toBe(false);
+  });
+});

@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { authenticate, requireAdmin } from "../middleware/auth";
+import { asyncRoute } from "../utils/asyncRoute";
 import { coins } from "../services/coins";
 import {
   CoinOrderRecord,
@@ -92,7 +93,7 @@ function paymentDto(payment: PaymentInstruction) {
 
 // --- Buyer ------------------------------------------------------------------
 
-router.get("/me", authenticate, async (req: Request, res: Response) => {
+router.get("/me", authenticate, asyncRoute(async (req: Request, res: Response) => {
   const wallet = await coins().walletFor(userId(req));
   if (!wallet) {
     res.status(404).json({ error: "User not found" });
@@ -107,9 +108,9 @@ router.get("/me", authenticate, async (req: Request, res: Response) => {
     passes: wallet.passes,
     purchasesEnabled: wallet.purchasesEnabled,
   });
-});
+}));
 
-router.post("/orders", authenticate, async (req: Request, res: Response) => {
+router.post("/orders", authenticate, asyncRoute(async (req: Request, res: Response) => {
   const result = await coins().createOrder(userId(req), req.body?.packId);
   send(
     res,
@@ -117,37 +118,45 @@ router.post("/orders", authenticate, async (req: Request, res: Response) => {
     ({ order, payment }) => ({ order: orderDto(order), payment: paymentDto(payment) }),
     201,
   );
-});
+}));
 
-router.post("/orders/:id/reference", authenticate, async (req: Request, res: Response) => {
+router.post("/orders/:id/reference", authenticate, asyncRoute(async (req: Request, res: Response) => {
   const result = await coins().submitReference(
     userId(req),
     pathId(req),
     String(req.body?.paymentRef ?? req.body?.upiRef ?? ""),
   );
   send(res, result, (order) => ({ order: orderDto(order) }));
-});
+}));
 
-router.post("/orders/:id/cancel", authenticate, async (req: Request, res: Response) => {
+router.get("/orders/:id/payment", authenticate, asyncRoute(async (req: Request, res: Response) => {
+  const result = await coins().reopenOrder(userId(req), pathId(req));
+  send(res, result, ({ order, payment }) => ({
+    order: orderDto(order),
+    payment: paymentDto(payment),
+  }));
+}));
+
+router.post("/orders/:id/cancel", authenticate, asyncRoute(async (req: Request, res: Response) => {
   const result = await coins().cancelOrder(userId(req), pathId(req));
   send(res, result, () => ({ ok: true }));
-});
+}));
 
-router.get("/orders", authenticate, async (req: Request, res: Response) => {
+router.get("/orders", authenticate, asyncRoute(async (req: Request, res: Response) => {
   const orders = await coins().ordersFor(userId(req));
   res.json({ orders: orders.map(orderDto) });
-});
+}));
 
-router.post("/passes", authenticate, async (req: Request, res: Response) => {
+router.post("/passes", authenticate, asyncRoute(async (req: Request, res: Response) => {
   const result = await coins().redeemPass(userId(req), req.body?.passId);
   send(res, result, ({ coins: balance, premiumExpiry }) => ({
     coins: balance,
     isPremium: true,
     premiumExpiry: premiumExpiry.toISOString(),
   }));
-});
+}));
 
-router.get("/ledger", authenticate, async (req: Request, res: Response) => {
+router.get("/ledger", authenticate, asyncRoute(async (req: Request, res: Response) => {
   const entries = await coins().ledgerFor(userId(req));
   res.json({
     entries: entries.map((e) => ({
@@ -158,13 +167,27 @@ router.get("/ledger", authenticate, async (req: Request, res: Response) => {
       createdAt: e.createdAt.toISOString(),
     })),
   });
-});
+}));
 
 // --- Review -----------------------------------------------------------------
 
-router.get("/admin/orders", authenticate, requireAdmin, async (req: Request, res: Response) => {
-  const requested = String(req.query.status ?? "under_review");
-  const status = (requested === "all" ? "all" : requested) as OrderStatus | "all";
+router.get("/admin/orders", authenticate, requireAdmin, asyncRoute(async (req: Request, res: Response) => {
+  // Validated rather than cast. An unrecognised value used to reach the query
+  // and quietly return nothing, which reads as "no payments waiting" — the one
+  // answer a reviewer must never be given wrongly.
+  const allowed: Array<OrderStatus | "all"> = [
+    "awaiting_payment",
+    "under_review",
+    "approved",
+    "rejected",
+    "all",
+  ];
+  const requested = String(req.query.status ?? "under_review") as OrderStatus | "all";
+  if (!allowed.includes(requested)) {
+    res.status(400).json({ error: "Unknown status filter" });
+    return;
+  }
+  const status = requested;
 
   const orders = await coins().ordersForReview(status);
   res.json({
@@ -174,30 +197,30 @@ router.get("/admin/orders", authenticate, requireAdmin, async (req: Request, res
       email: order.email,
     })),
   });
-});
+}));
 
 router.post(
   "/admin/orders/:id/approve",
   authenticate,
   requireAdmin,
-  async (req: Request, res: Response) => {
+  asyncRoute(async (req: Request, res: Response) => {
     const result = await coins().approveOrder(pathId(req), userId(req));
     send(res, result, ({ credited, balance }) => ({ ok: true, credited, balance }));
-  },
+  }),
 );
 
 router.post(
   "/admin/orders/:id/reject",
   authenticate,
   requireAdmin,
-  async (req: Request, res: Response) => {
+  asyncRoute(async (req: Request, res: Response) => {
     const result = await coins().rejectOrder(
       pathId(req),
       userId(req),
       String(req.body?.note ?? ""),
     );
     send(res, result, () => ({ ok: true }));
-  },
+  }),
 );
 
 export default router;

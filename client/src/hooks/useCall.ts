@@ -413,6 +413,16 @@ export function useCall() {
       const stream = await startCamera();
       if (!stream) return;
       setError(null);
+      /*
+       * Cleared before every join, and set again only if the server says so.
+       *
+       * The notice is about the join that is happening now. Left standing, it
+       * outlives the thing it described: someone who buys a pass and comes
+       * back still sees "choosing a gender is premium" over a search that is,
+       * this time, actually filtering — and the bar that would have told them
+       * so is hidden behind it.
+       */
+      setRestrictedFilters([]);
       getSocket().emit("join-queue", filters);
     },
     [startCamera],
@@ -434,6 +444,7 @@ export function useCall() {
       setPartner(null);
       setMessages([]);
       // Straight back into the queue: that is what "next" means here.
+      setRestrictedFilters([]);
       getSocket().emit("join-queue", filters);
     },
     [teardownPeer],

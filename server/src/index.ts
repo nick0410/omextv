@@ -170,6 +170,33 @@ async function start(): Promise<void> {
     console.error("  ⚠️  Gender provider failed to initialise:", err);
   }
 
+  /*
+   * A process that cannot listen must not linger.
+   *
+   * listen() reports failure by emitting "error", which with no handler
+   * becomes an uncaught exception — and the guard below deliberately keeps the
+   * process alive through those. For a runtime error that is right. For a
+   * failed bind it is actively harmful: setupSocket has already connected to
+   * Redis and started the sweep timers, so the instance goes on matching and
+   * evicting entries in the shared queue while holding no sockets of its own.
+   *
+   * Six of them accumulated that way during development. Users were being
+   * paired by an instance that could not deliver to them, and simply vanished
+   * from the queue — which reads exactly like a matchmaking bug, several
+   * layers away from the port conflict that caused it.
+   */
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      console.error(
+        `[server] port ${env.PORT} is already in use. Another instance is running; ` +
+          `stop it first. Exiting rather than running alongside it.`,
+      );
+    } else {
+      console.error("[server] could not listen:", err.stack ?? err.message);
+    }
+    process.exit(1);
+  });
+
   server.listen(env.PORT, () => {
     console.log(`
   ✨ Omextv API Server
@@ -219,6 +246,10 @@ async function shutdown(signal: string): Promise<void> {
  * uncaught *exception* leaves less certainty about internal state, so it is
  * logged loudly but still not fatal; the health check reports the store being
  * unreachable, which is what a supervisor should restart on.
+ *
+ * Startup is the exception, and it is handled where it happens: a process that
+ * failed to bind its port has nothing to survive for, and surviving is worse
+ * than exiting because it keeps mutating shared state. See server.on("error").
  */
 process.on("unhandledRejection", (reason) => {
   const message = reason instanceof Error ? reason.stack ?? reason.message : String(reason);

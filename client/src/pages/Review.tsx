@@ -29,11 +29,17 @@ interface ReviewOrder {
 
 const rupees = (paise: number) => (paise / 100).toLocaleString("en-IN");
 
+function messageFrom(err: unknown, fallback: string): string {
+  const res = (err as { response?: { data?: { error?: string } } }).response;
+  return res?.data?.error ?? fallback;
+}
+
 export default function Review() {
   const [orders, setOrders] = useState<ReviewOrder[]>([]);
   const [status, setStatus] = useState("under_review");
   const [state, setState] = useState<"loading" | "ready" | "denied" | "error">("loading");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -62,6 +68,9 @@ export default function Review() {
       setBusyId(order.id);
       try {
         await api.post(`/coins/admin/orders/${order.id}/reject`, { note });
+        setProblem(null);
+      } catch (err) {
+        setProblem(messageFrom(err, "Could not reject that order."));
       } finally {
         setBusyId(null);
       }
@@ -69,6 +78,15 @@ export default function Review() {
       setBusyId(order.id);
       try {
         await api.post(`/coins/admin/orders/${order.id}/approve`);
+        setProblem(null);
+      } catch (err) {
+        /*
+         * Said out loud, because silence here is worse than useless. A failed
+         * approval used to reload the list and look identical to a successful
+         * one: the reviewer moves on believing someone was credited who was
+         * not, and the buyer waits with their money already gone.
+         */
+        setProblem(messageFrom(err, "Could not approve that order."));
       } finally {
         setBusyId(null);
       }
@@ -102,6 +120,12 @@ export default function Review() {
           <option value="all">All</option>
         </select>
       </header>
+
+      {problem && (
+        <p className="mb-4 rounded-xl bg-amber-500/10 px-3.5 py-2.5 text-sm text-amber-800">
+          {problem}
+        </p>
+      )}
 
       {state === "loading" && <p className="text-ink-500">Loading…</p>}
       {state === "error" && <p className="text-ink-600">Could not load the queue.</p>}

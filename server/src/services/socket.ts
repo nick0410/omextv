@@ -19,6 +19,7 @@ import { RateLimiter } from "../utils/rateLimiter";
 import { detach } from "../utils/detach";
 import { parseMatchFilters, genderVerifySchema } from "../utils/validation";
 import { applyEntitlement } from "./coins/entitlement";
+import { coins } from "./coins";
 import {
   JWTPayload,
   QueueEntry,
@@ -353,6 +354,19 @@ async function onJoinQueue(socket: AuthedSocket, payload: unknown): Promise<void
    * what was dropped so it can say so plainly instead of leaving someone to
    * wonder why they are meeting people they filtered out.
    */
+  /*
+   * Asked now, not remembered from the handshake.
+   *
+   * A socket authenticates once and can live for hours. Someone who buys a
+   * pass mid-session would otherwise stay clamped to the free tier until they
+   * happened to reconnect — they pay, pick a gender, and meet everyone anyway,
+   * which is indistinguishable from the payment having failed. The same read
+   * catches a pass that lapsed during the session, in the other direction.
+   *
+   * One primary-key lookup, on a path that is already rate limited per user.
+   */
+  user.isPremium = await coins().isPremiumNow(user.id);
+
   const requested = parseMatchFilters(payload);
   const { filters, dropped } = applyEntitlement(requested, user.isPremium);
   if (dropped.length > 0) {

@@ -69,6 +69,35 @@ export default function Coins() {
     }
   };
 
+  /** Fetch the payment instruction for an order started earlier. */
+  const resume = async (order: CoinOrder) => {
+    setBusy(true);
+    setProblem(null);
+    try {
+      const res = await api.get<{ order: CoinOrder; payment: PaymentInstruction }>(
+        `/coins/orders/${order.id}/payment`,
+      );
+      setCheckout(res.data);
+    } catch (err) {
+      setProblem(errorFrom(err, "Could not reopen that order."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const abandon = async (order: CoinOrder) => {
+    setBusy(true);
+    setProblem(null);
+    try {
+      await api.post(`/coins/orders/${order.id}/cancel`);
+      await loadOrders();
+    } catch (err) {
+      setProblem(errorFrom(err, "Could not cancel that order."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const redeem = async (pass: CoinPass) => {
     setBusy(true);
     setProblem(null);
@@ -232,6 +261,38 @@ export default function Coins() {
                     </span>
                     {order.note && (
                       <span className="w-full text-xs text-ink-400">{order.note}</span>
+                    )}
+
+                    {/*
+                      * A way back to an order started earlier.
+                      *
+                      * Without these the list was a dead end: an unpaid order
+                      * showed its status and nothing else, so a buyer who
+                      * closed the page could neither reach the QR again nor
+                      * abandon it — and after five such orders the cap stopped
+                      * them starting a sixth.
+                      */}
+                    {(order.status === "awaiting_payment" || order.status === "rejected") && (
+                      <span className="flex w-full gap-2 sm:w-auto">
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => resume(order)}
+                          className="min-h-11 rounded-lg px-2 font-medium text-brand-600 hover:text-brand-700 disabled:opacity-50 sm:min-h-0"
+                        >
+                          {order.status === "rejected" ? "Try again" : "Pay"}
+                        </button>
+                        {order.status === "awaiting_payment" && (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => abandon(order)}
+                            className="min-h-11 rounded-lg px-2 text-ink-500 hover:text-ink-700 disabled:opacity-50 sm:min-h-0"
+                          >
+                            Cancel
+                          </button>
+                        )}
+                      </span>
                     )}
                   </li>
                 ))}
