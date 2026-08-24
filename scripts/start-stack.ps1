@@ -92,8 +92,25 @@ if ($apiUp) {
   Write-Host 'API is already running.' -ForegroundColor Green
 } else {
   Write-Host 'Starting the API...'
-  Start-Process -FilePath 'npm' -ArgumentList 'run', 'dev' `
-    -WorkingDirectory (Join-Path $PSScriptRoot '..\server') -WindowStyle Hidden
+
+  # Launched through cmd, because Start-Process cannot run npm directly.
+  #
+  # Start-Process does not apply PATHEXT, so the bare name "npm" finds nothing;
+  # and Get-Command resolves it to the extension-less shell script, which
+  # Windows refuses with "%1 is not a valid Win32 application". Only npm.cmd is
+  # executable here, and letting cmd do the lookup is the version that does not
+  # depend on which npm shim happens to be first on PATH.
+  #
+  # This branch had never actually run: every earlier invocation found the API
+  # already up and skipped it, so a script whose whole job is bringing the
+  # stack up could not do it.
+  #
+  # Output goes to a log, so "it did not come up" can be diagnosed.
+  $apiLog = Join-Path $env:TEMP 'omextv-api.log'
+  Start-Process -FilePath $env:ComSpec -ArgumentList '/c', 'npm', 'run', 'dev' `
+    -WorkingDirectory (Join-Path $PSScriptRoot '..\server') -WindowStyle Hidden `
+    -RedirectStandardOutput $apiLog -RedirectStandardError "$apiLog.err"
+
   foreach ($i in 1..25) {
     Start-Sleep -Seconds 2
     try {
@@ -103,7 +120,7 @@ if ($apiUp) {
       break
     } catch { }
   }
-  if (-not $apiUp) { throw 'The API did not come up. See server output.' }
+  if (-not $apiUp) { throw "The API did not come up. See $apiLog and $apiLog.err" }
 }
 
 Write-Host ''
