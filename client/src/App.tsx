@@ -8,6 +8,7 @@ import Chat from "./pages/Chat";
 import Diagnostics from "./pages/Diagnostics";
 import Coins from "./pages/Coins";
 import Review from "./pages/Review";
+import Admin from "./pages/Admin";
 import { Contact, Privacy, Refunds, Terms } from "./pages/Legal";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -50,6 +51,14 @@ export default function App() {
           element={
             <RequireAuth>
               <Review />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/admin"
+          element={
+            <RequireAuth>
+              <Admin />
             </RequireAuth>
           }
         />
