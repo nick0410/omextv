@@ -6,8 +6,8 @@
 #   ADMIN_EMAILS  who may approve payments once they arrive
 #
 # Both have to come from you. A wrong VPA is the worst failure this app can
-# have — the QR renders, the buyer pays, and the money goes to a stranger with
-# no way back — so the value is checked for shape here and never printed back
+# have - the QR renders, the buyer pays, and the money goes to a stranger with
+# no way back - so the value is checked for shape here and never printed back
 # out.
 #
 #   powershell -File scripts/set-upi.ps1 -UpiId "yourname@paytm" -AdminEmail "you@example.com"
@@ -16,7 +16,7 @@
 #
 #   -PayeeName "Omextv"
 #
-# ADMIN_EMAILS must name an account that has signed up on the site — approval
+# ADMIN_EMAILS must name an account that has signed up on the site - approval
 # is checked against the email on the account, not against the token.
 
 param(
@@ -40,7 +40,7 @@ if ($admins -notmatch '@') { throw "ADMIN_EMAILS needs at least one email addres
 $envPath = Join-Path $PSScriptRoot '..\server\.env'
 if (-not (Test-Path $envPath)) { throw "server/.env not found at $envPath" }
 
-# Rewrite in place, preserving every other line and its order — this file also
+# Rewrite in place, preserving every other line and its order - this file also
 # holds the database URL and the JWT secret, and losing those is a much worse
 # outcome than a missing payee.
 $wanted = [ordered]@{
@@ -60,7 +60,10 @@ foreach ($key in $wanted.Keys) {
 }
 
 Copy-Item $envPath "$envPath.bak" -Force
-Set-Content -Path $envPath -Value $lines -Encoding UTF8
+# WriteAllLines with an explicit encoding, because Set-Content -Encoding UTF8
+# prepends a byte-order mark. .env is read as plain text, so that mark becomes
+# part of the first variable's name and it quietly stops being found.
+[System.IO.File]::WriteAllLines($envPath, $lines, (New-Object System.Text.UTF8Encoding($false)))
 Write-Host "Wrote the payee to server/.env (previous copy at .env.bak)" -ForegroundColor Green
 
 # The API reads .env once, at boot.
@@ -85,7 +88,7 @@ $reg = Invoke-RestMethod 'http://localhost:3001/api/auth/register' -Method Post 
 $me = Invoke-RestMethod 'http://localhost:3001/api/coins/me' `
   -Headers @{ Authorization = "Bearer $($reg.token)" }
 
-if (-not $me.upiEnabled) { throw "The API still reports UPI as off. Check server/.env." }
+if (-not $me.purchasesEnabled) { throw "The API still reports payments as off. Check server/.env." }
 Write-Host 'The checkout is live and will collect to your UPI ID.' -ForegroundColor Green
 
 Write-Host ''
@@ -93,7 +96,8 @@ Write-Host 'Check the whole flow end to end:'
 Write-Host '  cd server; npm run coins:check'
 Write-Host ''
 Write-Host 'Approve payments at https://omextv.vercel.app/review'
-Write-Host "  (sign in as $($admins.Split(',')[0]) — it must be an account that exists)"
+$firstAdmin = ($admins -split ',')[0]
+Write-Host "  (sign in as $firstAdmin - it must be an account that already exists)"
 Write-Host ''
 Write-Host 'Scan the QR with your own phone once and pay 1 rupee before telling'
 Write-Host 'anyone about it. That is the only way to be certain the money arrives.'

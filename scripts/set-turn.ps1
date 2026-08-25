@@ -65,7 +65,10 @@ foreach ($key in $wanted.Keys) {
 
 # Back up before overwriting, so a bad run is recoverable.
 Copy-Item $envPath "$envPath.bak" -Force
-Set-Content -Path $envPath -Value $lines -Encoding UTF8
+# WriteAllLines rather than Set-Content -Encoding UTF8, which prepends a
+# byte-order mark. .env is read as plain text, so that mark becomes part of the
+# first variable's name and it quietly stops being found.
+[System.IO.File]::WriteAllLines($envPath, $lines, (New-Object System.Text.UTF8Encoding($false)))
 Write-Host "Wrote TURN settings to server/.env (previous copy at .env.bak)" -ForegroundColor Green
 
 Write-Host 'Waiting for the API to reload...'
