@@ -150,8 +150,31 @@ try {
     Write-Host 'Hostname unchanged; nothing to publish.'
   } else {
     git commit -q -m "Point the client at $url"
-    git push -q origin main
-    Write-Host 'Published the new hostname.' -ForegroundColor Green
+
+    # Retry, then say so loudly. The push is what makes the address real to
+    # visitors; the commit alone changes nothing they can see.
+    #
+    # It failed once with "Could not resolve host: github.com" — the same DNS
+    # unreliability that keeps killing the tunnel — and the script printed
+    # "Published the new hostname" anyway. The site spent the next half hour
+    # pointing at a tunnel that no longer existed while every check said fine.
+    $pushed = $false
+    foreach ($attempt in 1..3) {
+      git push -q origin main
+      if ($LASTEXITCODE -eq 0) { $pushed = $true; break }
+      if ($attempt -lt 3) {
+        Write-Warning "  push failed (attempt $attempt); retrying in 5s"
+        Start-Sleep -Seconds 5
+      }
+    }
+
+    if ($pushed) {
+      Write-Host 'Published the new hostname.' -ForegroundColor Green
+    } else {
+      Write-Warning 'PUBLISH FAILED. The commit is made but not pushed, so the'
+      Write-Warning 'site is still pointing at the previous address and is down'
+      Write-Warning 'for visitors. Run: git push origin main'
+    }
   }
 } finally {
   Pop-Location

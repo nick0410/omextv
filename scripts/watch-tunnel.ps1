@@ -87,6 +87,49 @@ function Test-Serving($url) {
   }
 }
 
+<#
+  Is there a publish that was made but never landed?
+
+  tunnel.ps1 commits runtime-config.json and pushes it. When the push fails —
+  and it does, on the same DNS unreliability that keeps killing the tunnel —
+  the commit sits here and nothing retries it. The site then points at the
+  previous address while every other check reports healthy, which is exactly
+  how it stayed down for half an hour.
+
+  Deliberately a local question. Asking GitHub what it currently serves needs
+  the network, and the moments this matters are the moments the network is the
+  problem: the first version of this check fetched raw.githubusercontent, timed
+  out, and returned "fine" every time. A failed push leaves the local
+  origin/main ref pointing at the old commit, so being ahead of it is
+  answerable offline and is the same fact.
+#>
+function Get-UnpushedCount {
+  $repo = Join-Path $PSScriptRoot '..'
+  Push-Location $repo
+  try {
+    $count = git rev-list --count origin/main..HEAD 2>$null
+    if ($LASTEXITCODE -ne 0) { return 0 }
+    return [int]($count | Select-Object -First 1)
+  } catch {
+    return 0
+  } finally {
+    Pop-Location
+  }
+}
+
+function Publish-Pending {
+  $repo = Join-Path $PSScriptRoot '..'
+  Push-Location $repo
+  try {
+    git push -q origin main 2>&1 | Out-Null
+    return ($LASTEXITCODE -eq 0)
+  } catch {
+    return $false
+  } finally {
+    Pop-Location
+  }
+}
+
 function Test-ApiUp {
   try {
     Invoke-RestMethod 'http://localhost:3001/health' -TimeoutSec 8 | Out-Null
@@ -124,6 +167,17 @@ for (;;) {
     Say "no tunnel hostname in the log ($failures/$FailuresBeforeRestart)" 'Yellow'
   } elseif (Test-Serving $url) {
     if ($failures -gt 0) { Say "recovered on its own: $url" 'Green' }
+
+    # Serving, but is anyone being told about it?
+    $unpushed = Get-UnpushedCount
+    if ($unpushed -gt 0) {
+      Say "$unpushed commit(s) not pushed - visitors may be on the old address" 'Yellow'
+      if (Publish-Pending) {
+        Say 'pushed; visitors will pick it up within a few minutes' 'Green'
+      } else {
+        Say 'push failed - run: git push origin main' 'Red'
+      }
+    }
     # MinValue means the first healthy check always prints, so the log shows
     # the watchdog working from the moment it starts.
     if (([DateTime]::UtcNow - $lastHeartbeat).TotalMinutes -ge $HeartbeatMinutes) {
