@@ -162,18 +162,58 @@ export function useCall() {
 
   // --- Peer connection ---------------------------------------------------
 
+  /*
+   * An offer that arrived before there was anything to answer it with.
+   *
+   * createPeer fetches ICE servers before it can build the connection, and
+   * that fetch is a round trip to the API — over a tunnel, not a fast one.
+   * Both sides start it the instant they are matched, so the initiator
+   * routinely finishes first and its offer lands while the other side is
+   * still waiting on the same request, with peerRef.current still null.
+   *
+   * ICE candidates were already buffered for exactly this reason. The offer
+   * was not: it was dropped, no answer was ever sent, and both people sat
+   * looking at a connection that never carried anything. Same treatment.
+   */
+  const pendingOffer = useRef<RTCSessionDescriptionInit | null>(null);
+
   const teardownPeer = useCallback(() => {
     const peer = peerRef.current;
     if (peer) {
       peer.onicecandidate = null;
       peer.ontrack = null;
       peer.onconnectionstatechange = null;
+      peer.oniceconnectionstatechange = null;
       peer.close();
     }
     peerRef.current = null;
     pendingCandidates.current = [];
+    pendingOffer.current = null;
     setRemoteStream(null);
   }, []);
+
+  /**
+   * Answer an offer: apply it, flush anything that arrived early, reply.
+   *
+   * Shared because there are two moments it can happen — when the offer
+   * arrives and the connection is ready, or when the connection becomes ready
+   * and the offer is already waiting.
+   */
+  const answerOffer = useCallback(
+    async (peer: RTCPeerConnection, offer: RTCSessionDescriptionInit, room: string | null) => {
+      await peer.setRemoteDescription(new RTCSessionDescription(offer));
+
+      for (const candidate of pendingCandidates.current) {
+        await peer.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+      }
+      pendingCandidates.current = [];
+
+      const answer = await peer.createAnswer();
+      await peer.setLocalDescription(answer);
+      getSocket().emit("answer", { roomId: room, answer });
+    },
+    [],
+  );
 
   const createPeer = useCallback(async (room: string, initiator: boolean) => {
     let ice: RTCIceServer[] = FALLBACK_ICE;
@@ -208,8 +248,30 @@ export function useCall() {
     };
 
     peer.ontrack = (event) => {
+      /*
+       * A track object, not a picture.
+       *
+       * ontrack fires as soon as the remote description is applied and a
+       * transceiver exists — before ICE has connected and long before any
+       * frame arrives. Calling that "live" is what produced the report this
+       * comment exists for: the header said LIVE, the partner's name appeared
+       * over their tile, and the tile stayed black forever because the two
+       * networks never managed to connect.
+       *
+       * Keep the stream; let the connection state decide when it is live.
+       */
       setRemoteStream(event.streams[0]);
-      setPhase("live");
+    };
+
+    /*
+     * Two listeners for one question, because browsers disagree about which
+     * one to answer it with. connectionState is the modern signal; Safari has
+     * historically only moved iceConnectionState. Missing both would leave a
+     * working call stuck on "Connecting".
+     */
+    peer.oniceconnectionstatechange = () => {
+      const state = peer.iceConnectionState;
+      if (state === "connected" || state === "completed") setPhase("live");
     };
 
     peer.onconnectionstatechange = () => {
@@ -226,13 +288,18 @@ export function useCall() {
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
       socket.emit("offer", { roomId: room, offer });
+    } else if (pendingOffer.current) {
+      // It arrived while the ICE fetch was still in flight.
+      const waiting = pendingOffer.current;
+      pendingOffer.current = null;
+      await answerOffer(peer, waiting, room);
     }
 
     return peer;
     // Deliberately no `hasTurn` dependency: the handler reads the ref, so
     // rebuilding this callback on every change would only churn the socket
     // listeners that depend on it.
-  }, []);
+  }, [answerOffer]);
 
   // --- Socket wiring -----------------------------------------------------
 
@@ -284,17 +351,14 @@ export function useCall() {
 
     const onOffer = async ({ offer }: { offer: RTCSessionDescriptionInit }) => {
       const peer = peerRef.current;
-      if (!peer) return;
-      await peer.setRemoteDescription(new RTCSessionDescription(offer));
-
-      for (const candidate of pendingCandidates.current) {
-        await peer.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+      if (!peer) {
+        // createPeer is still fetching ICE servers. Keep it; createPeer picks
+        // it up as soon as the connection exists. Dropping it here is what
+        // left both people staring at a call that never started.
+        pendingOffer.current = offer;
+        return;
       }
-      pendingCandidates.current = [];
-
-      const answer = await peer.createAnswer();
-      await peer.setLocalDescription(answer);
-      getSocket().emit("answer", { roomId: roomRef.current, answer });
+      await answerOffer(peer, offer, roomRef.current);
     };
 
     const onAnswer = async ({ answer }: { answer: RTCSessionDescriptionInit }) => {
@@ -396,7 +460,7 @@ export function useCall() {
       socket.off("chat-ended", onChatEnded);
       socket.off("session-replaced", onSessionReplaced);
     };
-  }, [createPeer, teardownPeer]);
+  }, [createPeer, teardownPeer, answerOffer]);
 
   // Poll queue position while waiting, so the UI is not frozen on a stale number.
   useEffect(() => {
