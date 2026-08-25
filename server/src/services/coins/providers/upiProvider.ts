@@ -11,7 +11,6 @@ import { buildUpiRequest, isUpiConfigured, looksLikeUpiRef } from "../upi";
  * `confirmsAutomatically` is false, and it is the field that shapes everything
  * downstream: a direct transfer lands in a bank account and tells the server
  * nothing, so an order cannot be completed by the person who owes the money.
- * A gateway provider would set it true and could credit without review.
  */
 export class UpiPaymentProvider implements PaymentProvider {
   readonly id = "upi";
@@ -21,11 +20,16 @@ export class UpiPaymentProvider implements PaymentProvider {
     return isUpiConfigured();
   }
 
-  instructionFor(order: {
+  /**
+   * Nothing to ask anyone, so this resolves immediately. The signature is
+   * async only because a gateway has to register the payment before the buyer
+   * can make it.
+   */
+  async instructionFor(order: {
     id: string;
     amountPaise: number;
     description: string;
-  }): PaymentInstruction {
+  }): Promise<PaymentInstruction> {
     const request = buildUpiRequest({
       amountPaise: order.amountPaise,
       reference: order.id,
@@ -33,7 +37,8 @@ export class UpiPaymentProvider implements PaymentProvider {
     });
 
     return {
-      kind: this.id,
+      kind: "transfer",
+      provider: this.id,
       link: request.link,
       payee: request.payeeVpa,
       payeeName: request.payeeName,

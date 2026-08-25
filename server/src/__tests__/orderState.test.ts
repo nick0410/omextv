@@ -23,6 +23,7 @@ describe("order transitions", () => {
   it("allows exactly the moves that make sense", () => {
     const allowed = new Set([
       "awaiting_payment->under_review",
+      "awaiting_payment->approved",
       "awaiting_payment->rejected",
       "under_review->approved",
       "under_review->rejected",
@@ -50,9 +51,18 @@ describe("order transitions", () => {
     expect(canTransition("rejected", "under_review")).toBe(true);
   });
 
-  it("never lets an order go straight from unpaid to credited", () => {
-    // The step it would skip is the only one that checks a bank statement.
-    expect(canTransition("awaiting_payment", "approved")).toBe(false);
+  it("allows unpaid to credited, which only a gateway may use", () => {
+    /*
+     * This was forbidden while every payment was a bank transfer, because the
+     * step it skips is the only one that checks a statement. A gateway signs a
+     * callback saying the payment happened, so for that provider the check has
+     * already been done by someone else.
+     *
+     * The table cannot tell which provider is in play, so the restriction sits
+     * in CoinService.confirmPayment, which refuses for any provider that does
+     * not confirm automatically. coinService.test.ts covers that.
+     */
+    expect(canTransition("awaiting_payment", "approved")).toBe(true);
   });
 
   it("counts as open exactly the states an order can still move out of", () => {

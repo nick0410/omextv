@@ -238,7 +238,10 @@ suite("coin endpoints", () => {
 
       expect(res.status).toBe(201);
       expect(res.body.order.status).toBe("awaiting_payment");
-      expect(res.body.payment.kind).toBe("upi");
+      // "transfer" is the shape (an address the buyer sends to); "upi" is which
+      // provider produced it. A gateway returns the other shape entirely.
+      expect(res.body.payment.kind).toBe("transfer");
+      expect(res.body.payment.provider).toBe("upi");
       expect(res.body.payment.link.startsWith("upi://pay?")).toBe(true);
       expect(res.body.payment.amountRupees).toBe("500.00");
     });

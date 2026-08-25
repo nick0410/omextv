@@ -60,6 +60,7 @@ export type ReferenceError =
 export type RedeemError = "unknown_pass" | "insufficient_coins";
 export type ReopenError = "not_found" | "wrong_state" | "payments_unavailable";
 export type ReviewError = "not_awaiting_review";
+export type ConfirmError = "not_confirmable" | "not_found" | "already_credited";
 
 export class CoinService {
   constructor(
@@ -145,7 +146,7 @@ export class CoinService {
 
     return ok({
       order,
-      payment: this.payments.instructionFor({
+      payment: await this.payments.instructionFor({
         id: order.id,
         amountPaise: order.amountPaise,
         description: `Omextv ${pack.name}`,
@@ -218,7 +219,7 @@ export class CoinService {
     const pack = findPack(order.packId);
     return ok({
       order,
-      payment: this.payments.instructionFor({
+      payment: await this.payments.instructionFor({
         id: order.id,
         amountPaise: order.amountPaise,
         description: `Omextv ${pack?.name ?? "coins"}`,
@@ -274,6 +275,64 @@ export class CoinService {
     });
 
     return result ? ok(result) : err("not_awaiting_review", "That order is not awaiting review.");
+  }
+
+  /**
+   * Credit an order because the payment provider said it was paid.
+   *
+   * The only path that hands out coins without a person looking, and it exists
+   * solely for providers that sign their callbacks. `confirmsAutomatically` is
+   * checked here rather than at the route, because it is a rule about what may
+   * happen to money — not about who is calling.
+   *
+   * Idempotent by the same claim the manual approval uses: Razorpay retries a
+   * webhook until it gets a 2xx, and the browser handshake and the webhook
+   * routinely both arrive for the same payment. Whichever runs first credits;
+   * the rest are told it is already done and change nothing.
+   */
+  async confirmPayment(
+    orderId: string,
+    providerRef: string,
+  ): Promise<Result<{ credited: number; balance: number; userId: string }, ConfirmError>> {
+    if (!this.payments.confirmsAutomatically) {
+      return err(
+        "not_confirmable",
+        "This payment method cannot confirm itself; it has to be reviewed.",
+      );
+    }
+
+    const existing = await this.repos.orders.findById(orderId);
+    if (!existing) return err("not_found", "Order not found.");
+    if (existing.status === "approved") {
+      return err("already_credited", "That payment was already credited.");
+    }
+
+    const result = await this.repos.transact(async (repos) => {
+      // Try both open states: the browser handshake usually arrives while the
+      // order is still awaiting payment, but a buyer who submitted a reference
+      // by hand first would have moved it on.
+      for (const from of ["awaiting_payment", "under_review"] as const) {
+        const claimed = await repos.orders.claim(orderId, from, "approved", {
+          reviewedAt: this.now(),
+          note: `Confirmed by ${this.payments.id}`,
+        });
+        if (!claimed) continue;
+
+        const order = await repos.orders.findById(orderId);
+        if (!order) return null;
+
+        const balance = await repos.wallet.credit(
+          order.userId,
+          order.coins,
+          "purchase",
+          providerRef || order.id,
+        );
+        return { credited: order.coins, balance, userId: order.userId };
+      }
+      return null;
+    });
+
+    return result ? ok(result) : err("already_credited", "That payment was already credited.");
   }
 
   async rejectOrder(

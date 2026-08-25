@@ -180,17 +180,44 @@ export interface CoinUnitOfWork extends CoinRepositories {
 
 // --- Payment ----------------------------------------------------------------
 
-/** What a buyer needs in order to actually pay. */
-export interface PaymentInstruction {
-  /** Which provider produced this, so the client can render it appropriately. */
-  kind: string;
+/**
+ * What a buyer needs in order to actually pay.
+ *
+ * A union, because the two ways of collecting money are genuinely different
+ * things and not one thing with optional fields. A transfer hands the buyer an
+ * address and trusts them to send to it; a gateway hands them a session that
+ * the gateway itself runs and then reports on. Squashing both into one shape
+ * would mean every field is optional and the client has to guess which half
+ * applies.
+ */
+export type PaymentInstruction = TransferInstruction | GatewayInstruction;
+
+/** Pay by opening a link or scanning a QR, and tell us afterwards. */
+export interface TransferInstruction {
+  kind: "transfer";
+  /** Which provider produced this, for display. */
+  provider: string;
   /** The URI a payment app opens, and what the QR encodes. */
   link: string;
-  /** Where the money goes, shown so the buyer can check it before confirming. */
+  /** Where the money goes, shown so the buyer can check before confirming. */
   payee: string;
   payeeName: string;
   amountRupees: string;
   /** Echoed into the buyer's app, to tie the payment back to the order. */
+  reference: string;
+}
+
+/** Pay inside a hosted checkout that reports the result back to us. */
+export interface GatewayInstruction {
+  kind: "gateway";
+  provider: string;
+  /** Publishable key. Safe in the browser; the secret never leaves the server. */
+  keyId: string;
+  /** The order id the gateway issued, which its callback will name. */
+  gatewayOrderId: string;
+  amountPaise: number;
+  amountRupees: string;
+  currency: string;
   reference: string;
 }
 
@@ -215,16 +242,26 @@ export interface PaymentProvider {
    *
    * False for a direct UPI transfer: money arrives in a bank account and
    * nothing reaches the server, which is why approval is a person matching a
-   * reference against a statement. A provider that returns true could credit
-   * without review.
+   * reference against a statement. True for a gateway, which signs a callback
+   * saying the payment happened — and only then may coins be credited without
+   * a human looking.
+   *
+   * This one flag is what the whole difference reduces to. Everything else
+   * about an order, a ledger entry or a balance is identical either way.
    */
   readonly confirmsAutomatically: boolean;
 
+  /**
+   * Async because a gateway has to be told about the payment before the buyer
+   * can make it — Razorpay issues an order id that its later callback names,
+   * and without that round trip there is nothing to tie the two together. The
+   * transfer provider has nothing to ask anyone and resolves immediately.
+   */
   instructionFor(order: {
     id: string;
     amountPaise: number;
     description: string;
-  }): PaymentInstruction;
+  }): Promise<PaymentInstruction>;
 
   /** Does this look like a reference this provider's payers would have? */
   isPlausibleReference(value: string): boolean;

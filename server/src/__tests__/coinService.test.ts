@@ -16,16 +16,22 @@ import { PaymentInstruction, PaymentProvider } from "../services/coins/ports";
 
 class FakeProvider implements PaymentProvider {
   readonly id = "fake";
-  readonly confirmsAutomatically = false;
+  /** Flipped by the tests that cover instant crediting. */
+  confirmsAutomatically = false;
   configured = true;
 
   isConfigured(): boolean {
     return this.configured;
   }
 
-  instructionFor(order: { id: string; amountPaise: number; description: string }): PaymentInstruction {
+  async instructionFor(order: {
+    id: string;
+    amountPaise: number;
+    description: string;
+  }): Promise<PaymentInstruction> {
     return {
-      kind: this.id,
+      kind: "transfer",
+      provider: this.id,
       link: `fake://pay?ref=${order.id}&amt=${order.amountPaise}`,
       payee: "someone@bank",
       payeeName: "Someone",
@@ -473,5 +479,101 @@ describe("knowing whether premium is live", () => {
 
   it("is false for an account that does not exist", async () => {
     expect(await service.isPremiumNow("nobody")).toBe(false);
+  });
+});
+
+describe("instant crediting, for a provider that confirms itself", () => {
+  /*
+   * The whole reason a gateway is worth its fee. A UPI transfer tells the
+   * server nothing, so coins wait on a person; a gateway signs a callback
+   * saying the payment happened, so they do not.
+   *
+   * Which makes confirmPayment the only path that hands out money with nobody
+   * looking, and the first test here is the one that matters: it must refuse
+   * to do that for a provider whose word means nothing.
+   */
+  async function unpaidOrder() {
+    const created = await service.createOrder(buyer, "starter");
+    if (!created.ok) throw new Error(created.code);
+    return created.value.order.id;
+  }
+
+  it("refuses a provider that cannot confirm its own payments", async () => {
+    // A transfer provider saying "paid" is just the buyer saying it, one layer
+    // removed. Crediting on that gives premium away to anyone who asks.
+    provider.confirmsAutomatically = false;
+    const id = await unpaidOrder();
+
+    expect(await service.confirmPayment(id, "pay_123")).toMatchObject({
+      code: "not_confirmable",
+    });
+    expect(await store.wallet.balanceOf(buyer)).toBe(0);
+  });
+
+  it("credits immediately when the provider does confirm", async () => {
+    provider.confirmsAutomatically = true;
+    const id = await unpaidOrder();
+
+    const result = await service.confirmPayment(id, "pay_abc");
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.value.credited).toBe(500);
+    expect(await store.wallet.balanceOf(buyer)).toBe(500);
+  });
+
+  it("credits once when the callback arrives twice", async () => {
+    // Razorpay retries a webhook until it gets a 2xx, and the browser
+    // handshake and the webhook routinely both land for the same payment.
+    provider.confirmsAutomatically = true;
+    const id = await unpaidOrder();
+
+    const first = await service.confirmPayment(id, "pay_abc");
+    const second = await service.confirmPayment(id, "pay_abc");
+
+    expect(first.ok).toBe(true);
+    expect(second).toMatchObject({ code: "already_credited" });
+    expect(await store.wallet.balanceOf(buyer)).toBe(500);
+    expect(store.ledgerFor(buyer).filter((e) => e.reason === "purchase")).toHaveLength(1);
+  });
+
+  it("credits an order the buyer had already sent for review", async () => {
+    // Someone who submitted a reference by hand and then paid through the
+    // gateway anyway. The order has moved on, and the confirmation still has
+    // to land rather than silently doing nothing.
+    provider.confirmsAutomatically = true;
+    const id = await orderAwaitingReview();
+
+    expect((await service.confirmPayment(id, "pay_xyz")).ok).toBe(true);
+    expect(await store.wallet.balanceOf(buyer)).toBe(500);
+  });
+
+  it("will not confirm an order that does not exist", async () => {
+    provider.confirmsAutomatically = true;
+    expect(await service.confirmPayment("no-such-order", "pay_abc")).toMatchObject({
+      code: "not_found",
+    });
+  });
+
+  it("records the gateway's payment id against the credit", async () => {
+    // What reconciliation against the gateway's own ledger is done with.
+    provider.confirmsAutomatically = true;
+    const id = await unpaidOrder();
+    await service.confirmPayment(id, "pay_traceable");
+
+    const purchase = store
+      .ledgerFor(buyer)
+      .find((e) => e.reason === "purchase") as unknown as { refId: string };
+    expect(purchase.refId).toBe("pay_traceable");
+  });
+
+  it("leaves an already-credited order alone", async () => {
+    provider.confirmsAutomatically = true;
+    const id = await orderAwaitingReview();
+    await service.approveOrder(id, reviewer);
+
+    expect(await service.confirmPayment(id, "pay_late")).toMatchObject({
+      code: "already_credited",
+    });
+    expect(await store.wallet.balanceOf(buyer)).toBe(500);
   });
 });

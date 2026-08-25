@@ -15,8 +15,14 @@ import { OrderStatus } from "./ports";
  */
 
 const TRANSITIONS: Record<OrderStatus, readonly OrderStatus[]> = {
-  // Nobody has claimed to have paid yet. It can be paid, or given up on.
-  awaiting_payment: ["under_review", "rejected"],
+  // Nobody has claimed to have paid yet. It can be sent for review, given up
+  // on, or — when a gateway confirms the payment itself — credited outright.
+  //
+  // That last one skips the human check, so it is only legal for a provider
+  // whose callback is signed. The state machine cannot know which provider is
+  // in play, so the rule lives in CoinService.confirmPayment, which refuses
+  // for anything that does not confirm automatically.
+  awaiting_payment: ["under_review", "approved", "rejected"],
 
   // A reference has been submitted and is waiting for a human.
   under_review: ["approved", "rejected"],

@@ -100,6 +100,15 @@ export const env = {
 
   RAZORPAY_KEY_ID: str("RAZORPAY_KEY_ID"),
   RAZORPAY_KEY_SECRET: str("RAZORPAY_KEY_SECRET"),
+  /**
+   * Signs the webhook Razorpay sends when a payment succeeds.
+   *
+   * Set separately in their dashboard, and separate from the API keys on
+   * purpose: without it the webhook endpoint cannot tell Razorpay from anyone
+   * else who found the URL, so coins are never credited automatically. Missing
+   * this is the difference between instant crediting and none at all.
+   */
+  RAZORPAY_WEBHOOK_SECRET: str("RAZORPAY_WEBHOOK_SECRET"),
 
   // --- Direct UPI ---
   /**
