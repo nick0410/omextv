@@ -16,6 +16,7 @@ const props = {
   online: {} as Record<string, number>,
   queued: false,
   restricted: [] as Array<"gender" | "country">,
+  isPremium: true,
   onClearAll: () => {},
 };
 
@@ -155,6 +156,48 @@ describe("ActiveFilters", () => {
       );
 
       expect(screen.queryByText(/will not match/i)).toBeNull();
+    });
+  });
+  describe("before the server has been asked", () => {
+    /*
+     * A free account's filters are ignored, and that was only said after the
+     * first join. Until then the bar claimed "Searching Women" over a search
+     * that was always going to be everyone — a promise the app could not keep
+     * and then blamed on the paywall.
+     */
+    it("warns a free account up front, with nothing dropped yet", () => {
+      renderFilters(
+        <ActiveFilters {...props} filters={filters({ gender: "female" })} isPremium={false} />,
+      );
+
+      expect(screen.getByText(/a gender is premium/i)).toBeInTheDocument();
+      expect(screen.queryByText(/Searching/)).toBeNull();
+    });
+
+    it("names both when both are set", () => {
+      renderFilters(
+        <ActiveFilters
+          {...props}
+          filters={filters({ gender: "male", countries: ["IN"] })}
+          isPremium={false}
+        />,
+      );
+      expect(screen.getByText(/a gender and a country/i)).toBeInTheDocument();
+    });
+
+    it("stays silent for a free account that asked for nothing", () => {
+      const { container } = renderFilters(
+        <ActiveFilters {...props} filters={filters()} isPremium={false} />,
+      );
+      expect(container).toBeEmptyDOMElement();
+    });
+
+    it("describes the search normally for a premium account", () => {
+      renderFilters(
+        <ActiveFilters {...props} filters={filters({ gender: "female" })} isPremium />,
+      );
+      expect(screen.getByText("Women")).toBeInTheDocument();
+      expect(screen.queryByText(/is premium/i)).toBeNull();
     });
   });
 });

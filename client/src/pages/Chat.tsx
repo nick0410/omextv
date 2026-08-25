@@ -107,7 +107,17 @@ export default function Chat() {
    */
   const suggestion = oppositeGender(detect.detected ?? user?.gender);
 
+  /*
+   * Only for an account that can actually have it.
+   *
+   * This used to apply the detected-gender default to everyone, including free
+   * accounts the server then clamps back to "anyone". The app was setting a
+   * filter you could not use, telling you it was searching that way, and only
+   * admitting otherwise after you pressed start — a contradiction it created
+   * for itself and then blamed on the paywall.
+   */
   if (
+    isPremium &&
     !suggestionApplied &&
     suggestion !== "any" &&
     filters.gender === "any"
@@ -231,6 +241,7 @@ export default function Chat() {
             online={onlineCountries}
             queued={state.phase === "queued"}
             restricted={state.restrictedFilters}
+            isPremium={isPremium}
             onClearAll={() => {
               // Also stop the detected-gender default from re-applying itself.
               setSuggestionApplied(true);

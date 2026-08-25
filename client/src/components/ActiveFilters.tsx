@@ -9,6 +9,8 @@ interface Props {
   queued: boolean;
   /** Filters the server refused to apply because the account is not premium. */
   restricted: Array<"gender" | "country">;
+  /** Whether these filters will be honoured at all. */
+  isPremium: boolean;
   onClearAll: () => void;
 }
 
@@ -28,11 +30,27 @@ const GENDER_LABEL: Record<string, string> = {
  * Showing the restriction next to the video — not behind a tab — is what turns
  * "it never connects" into "oh, I set that".
  */
-export function ActiveFilters({ filters, online, queued, restricted, onClearAll }: Props) {
+export function ActiveFilters({
+  filters,
+  online,
+  queued,
+  restricted,
+  isPremium,
+  onClearAll,
+}: Props) {
   const { countries, gender } = filters;
-  const restricted_ = restricted.length > 0;
   const asked = countries.length > 0 || gender !== "any";
   if (!asked) return null;
+
+  /*
+   * Known in advance, not only after the server says so.
+   *
+   * Waiting for the join meant the bar spent the whole time before it claiming
+   * the search was narrowed — "Searching Women" over a search that was always
+   * going to be everyone. Saying it up front is the difference between an
+   * explanation and a correction.
+   */
+  const restricted_ = restricted.length > 0 || !isPremium;
 
   const reachable = countries.reduce((sum, code) => sum + (online[code] ?? 0), 0);
   // Only meaningful once the counts have actually loaded.
@@ -47,10 +65,20 @@ export function ActiveFilters({ filters, online, queued, restricted, onClearAll 
    * was never applied, and would send someone hunting for the wrong problem.
    */
   if (restricted_) {
+    // Prefer what the server actually dropped; fall back to what is set,
+    // which is what it would drop.
+    const parts =
+      restricted.length > 0
+        ? restricted
+        : ([
+            gender !== "any" ? "gender" : null,
+            countries.length > 0 ? "country" : null,
+          ].filter(Boolean) as Array<"gender" | "country">);
+
     const what =
-      restricted.length === 2
+      parts.length === 2
         ? "a gender and a country"
-        : restricted[0] === "gender"
+        : parts[0] === "gender"
           ? "a gender"
           : "a country";
 
