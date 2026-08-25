@@ -1022,4 +1022,97 @@ describe.skipIf(!isDbReady())("stats", () => {
     socket.emit("join-queue", { gender: "female" });
     expect((await told).dropped).toContain("gender");
   });
+  it("lets someone queue again when the pair they are in has no other side", async () => {
+    /*
+     * Reported as: I left the chat and it still says I am in one.
+     *
+     * A pair row outlives the sockets it describes. The grace timer that would
+     * clear it lives in this process's memory, so a restart loses every
+     * pending teardown and the rows stay — and the queue guard believed them.
+     * The person is then stuck: told to skip or end a chat whose room no
+     * longer exists, so there is nothing to skip or end.
+     *
+     * Simulated the way it actually happens, by dropping one socket and
+     * letting presence lapse while the row remains.
+     */
+    const a = await makeUser();
+    const b = await makeUser();
+
+    const sa = await connect(a.token);
+    const sb = await connect(b.token);
+    await Promise.all([once(sa, "connected"), once(sb, "connected")]);
+
+    sa.emit("join-queue", {});
+    await once(sa, "queue-joined");
+    const matched = once(sb, "match-found");
+    sb.emit("join-queue", {});
+    await matched;
+
+    // B vanishes without ending anything, and its presence goes with it.
+    sb.disconnect();
+    await stores().presence.unregister(sb.id!);
+
+    // The row is still there, which is the whole problem.
+    expect(await stores().pairing.isPaired(a.id)).toBe(true);
+
+    // A should be let straight back into the queue rather than refused.
+    const joined = once(sa, "queue-joined", 5_000);
+    const refused = never(sa, "queue-error", 1_500);
+    sa.emit("join-queue", {});
+
+    await Promise.all([joined, refused]);
+    expect(await stores().pairing.isPaired(a.id)).toBe(false);
+  });
+
+  it("still refuses when the other side really is there", async () => {
+    // The guard has to keep working, or someone can be pulled out of a live
+    // conversation by a stray join.
+    const a = await makeUser();
+    const b = await makeUser();
+
+    const sa = await connect(a.token);
+    const sb = await connect(b.token);
+    await Promise.all([once(sa, "connected"), once(sb, "connected")]);
+
+    sa.emit("join-queue", {});
+    await once(sa, "queue-joined");
+    const matched = once(sb, "match-found");
+    sb.emit("join-queue", {});
+    await matched;
+
+    sa.emit("join-queue", {});
+    const error = await once<{ code: string }>(sa, "queue-error", 3_000);
+
+    expect(error?.code).toBe("already_in_chat");
+    expect(await stores().pairing.isPaired(a.id)).toBe(true);
+  });
+
+  it("does not resume a conversation whose other side has gone", async () => {
+    // The same stale row reached from the other direction: reconnecting would
+    // put someone back into a room with nobody in it, and then refuse to let
+    // them queue because they were "in a chat".
+    const a = await makeUser();
+    const b = await makeUser();
+
+    const sa = await connect(a.token);
+    const sb = await connect(b.token);
+    await Promise.all([once(sa, "connected"), once(sb, "connected")]);
+
+    sa.emit("join-queue", {});
+    await once(sa, "queue-joined");
+    const matched = once(sb, "match-found");
+    sb.emit("join-queue", {});
+    await matched;
+
+    sb.disconnect();
+    await stores().presence.unregister(sb.id!);
+    sa.disconnect();
+    await stores().presence.unregister(sa.id!);
+
+    const back = await connect(a.token);
+    await once(back, "connected");
+
+    await never(back, "chat-resumed", 1_500);
+    expect(await stores().pairing.isPaired(a.id)).toBe(false);
+  });
 });

@@ -251,8 +251,15 @@ async function onConnection(socket: AuthedSocket): Promise<void> {
     onlineCount: await store.presence.onlineCount(),
   });
 
-  // Restore an interrupted chat.
-  const existingPair = await store.pairing.pairOf(user.id);
+  /*
+   * Restore an interrupted chat — but only a real one.
+   *
+   * Resuming into a room whose other side is gone puts someone back in a
+   * conversation with nobody, and then refuses to let them queue because they
+   * are "in a chat". That is the same stale row, reached from the other
+   * direction.
+   */
+  const existingPair = await livePairFor(user.id);
   if (existingPair) {
     socket.join(existingPair.roomId);
     const partnerId =
@@ -310,6 +317,43 @@ function registerHandlers(socket: AuthedSocket, ready: Promise<void>): void {
   socket.on("disconnect", (reason) => gate("socket:disconnect", () => onDisconnect(socket, reason)));
 }
 
+/**
+ * Is this pair still a conversation, or just a record of one?
+ *
+ * A pair row outlives the sockets it describes. The reconnect grace timer that
+ * would clean it up lives in this process's memory, so a restart loses every
+ * pending teardown and the rows stay behind — and `isPaired` believed them.
+ * The result is someone who has left a chat being told they are still in one,
+ * with nothing they can do about it: the room is gone, so there is nothing to
+ * skip or end.
+ *
+ * Presence is the truth and the pair row is a cache of it. A partner who is
+ * not connected is not in a conversation, whatever the row says, so the row is
+ * cleared and the caller carries on.
+ *
+ * Checked where it hurts rather than swept on a timer, because a sweep leaves
+ * a window and this is the window someone is standing in.
+ *
+ * @returns the pair if it is genuinely live, otherwise null.
+ */
+async function livePairFor(userId: string): Promise<PairRecord | null> {
+  const store = stores();
+  const pair = await store.pairing.pairOf(userId);
+  if (!pair) return null;
+
+  const partnerId = pair.userAId === userId ? pair.userBId : pair.userAId;
+  if (await store.presence.isOnline(partnerId)) return pair;
+
+  // The other side is gone. Tear it down so both are free, and tell them if
+  // they happen to come back.
+  await teardownPair(pair.roomId, "disconnect", null);
+  await emitToUser(partnerId, "partner-left", {
+    reason: "disconnect",
+    roomId: pair.roomId,
+  });
+  return null;
+}
+
 // --- Queue -----------------------------------------------------------------
 
 async function onJoinQueue(socket: AuthedSocket, payload: unknown): Promise<void> {
@@ -325,8 +369,9 @@ async function onJoinQueue(socket: AuthedSocket, payload: unknown): Promise<void
     return;
   }
 
-  // Cannot queue while already talking to someone.
-  if (await stores().pairing.isPaired(user.id)) {
+  // Cannot queue while genuinely talking to someone. A pair whose other side
+  // has gone is cleared rather than used to refuse.
+  if (await livePairFor(user.id)) {
     socket.emit("queue-error", {
       code: "already_in_chat",
       message: "You are already in a chat. Skip or end it first.",
