@@ -7,7 +7,7 @@ import { ControlBar } from "../components/ControlBar";
 import { ChatPanel } from "../components/ChatPanel";
 import { FilterPanel } from "../components/FilterPanel";
 import { ActiveFilters } from "../components/ActiveFilters";
-import { premiumIsActive } from "../hooks/useWallet";
+import { premiumIsActive, useWallet } from "../hooks/useWallet";
 import { useOnlineCountries } from "../hooks/useOnlineCountries";
 import { ReportModal } from "../components/ReportModal";
 import { Logo } from "../components/Logo";
@@ -69,6 +69,16 @@ export default function Chat() {
    * concludes the app is broken rather than that they need to top up.
    */
   const isPremium = premiumIsActive(user);
+
+  /*
+   * The balance, where it is actually looked at.
+   *
+   * It only existed on the store page, which is the one place someone already
+   * knows what it is. Anywhere a coin can be spent, the number has to be in
+   * sight — otherwise the first time you learn you are out is when something
+   * refuses to work.
+   */
+  const { wallet } = useWallet();
   const logout = useAuthStore((s) => s.logout);
   const [filters, setFilters] = useState<MatchFilters>(loadFilters);
   const [showReport, setShowReport] = useState(false);
@@ -183,7 +193,14 @@ export default function Chat() {
               }`}
             >
               <span aria-hidden="true">{isPremium ? "✦" : "◎"}</span>
-              <span className="hidden sm:inline">{isPremium ? "Premium" : "Coins"}</span>
+              {/*
+                * The number first, the word second. On a phone the word is the
+                * part that goes, because "◎ 500" still says everything.
+                */}
+              <span className="tabular-nums">{wallet ? wallet.coins : "—"}</span>
+              <span className="hidden sm:inline">
+                {isPremium ? "Premium" : "coins"}
+              </span>
             </Link>
 
             <span className="hidden text-sm font-medium text-ink-700 sm:inline">
