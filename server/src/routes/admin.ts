@@ -48,6 +48,34 @@ async function withTimeout<T>(work: Promise<T>, ms: number, fallback: T): Promis
 
 const DAY = 24 * 60 * 60 * 1000;
 
+/**
+ * Domains that cannot belong to a real person.
+ *
+ * .test is reserved by RFC 6761 and .local is mDNS; neither can receive mail,
+ * so nothing under them is ever a customer. Every test script in this repo
+ * creates accounts there — probe.local, smoke.local, t.local, local.test.
+ *
+ * They were being counted as users. The dashboard read "452 accounts, 134 new
+ * today" when five were people and the rest were this project testing itself,
+ * which makes it a report on the test suite rather than on the business — and
+ * the kind of number someone makes a decision on.
+ *
+ * A rule rather than a list of known prefixes: a new script inventing its own
+ * fake domain is still excluded, as long as it stays inside the reserved space
+ * it should be using anyway.
+ */
+const SYNTHETIC_TLDS = [".local", ".test"];
+
+/** Matches accounts that could belong to somebody. */
+const realUser = {
+  AND: SYNTHETIC_TLDS.map((tld) => ({ email: { not: { endsWith: tld } } })),
+};
+
+/** Matches the rest, so they can be shown rather than silently dropped. */
+const syntheticUser = {
+  OR: SYNTHETIC_TLDS.map((tld) => ({ email: { endsWith: tld } })),
+};
+
 router.get(
   "/overview",
   authenticate,
@@ -144,12 +172,16 @@ async function loadFromDatabase(now: number) {
   // An order nobody has finished in a day is not going to finish itself.
   const staleBefore = new Date(now - DAY);
 
+  // A conversation counts only when both sides could be people.
+  const realChat = { userA: realUser, userB: realUser };
+
   const [
     total,
     today,
     week,
     premium,
     banned,
+    synthetic,
     orderGroups,
     approvedSum,
     coinSum,
@@ -160,26 +192,34 @@ async function loadFromDatabase(now: number) {
     reportsWeek,
     recent,
   ] = await Promise.all([
-    prisma.user.count(),
-    prisma.user.count({ where: { createdAt: { gte: dayAgo } } }),
-    prisma.user.count({ where: { createdAt: { gte: weekAgo } } }),
-    prisma.user.count({ where: { isPremium: true, premiumExpiry: { gt: new Date(now) } } }),
-    prisma.user.count({ where: { isBanned: true } }),
-    prisma.coinOrder.groupBy({ by: ["status"], _count: { _all: true } }),
+    prisma.user.count({ where: realUser }),
+    prisma.user.count({ where: { AND: [realUser, { createdAt: { gte: dayAgo } }] } }),
+    prisma.user.count({ where: { AND: [realUser, { createdAt: { gte: weekAgo } }] } }),
+    prisma.user.count({
+      where: { AND: [realUser, { isPremium: true, premiumExpiry: { gt: new Date(now) } }] },
+    }),
+    prisma.user.count({ where: { AND: [realUser, { isBanned: true }] } }),
+    prisma.user.count({ where: syntheticUser }),
+    prisma.coinOrder.groupBy({ by: ["status"], _count: { _all: true }, where: { user: realUser } }),
     prisma.coinOrder.aggregate({
-      where: { status: "approved" },
+      where: { status: "approved", user: realUser },
       _sum: { amountPaise: true },
     }),
     // What is owed to buyers: coins bought and not yet spent.
-    prisma.user.aggregate({ _sum: { coins: true } }),
-    prisma.coinOrder.count({ where: { status: "under_review" } }),
+    prisma.user.aggregate({ where: realUser, _sum: { coins: true } }),
+    prisma.coinOrder.count({ where: { status: "under_review", user: realUser } }),
     prisma.coinOrder.count({
-      where: { status: { in: ["awaiting_payment", "under_review"] }, createdAt: { lt: staleBefore } },
+      where: {
+        status: { in: ["awaiting_payment", "under_review"] },
+        createdAt: { lt: staleBefore },
+        user: realUser,
+      },
     }),
-    prisma.chatSession.count({ where: { startedAt: { gte: dayAgo } } }),
-    prisma.chatSession.count({ where: { startedAt: { gte: weekAgo } } }),
-    prisma.report.count({ where: { createdAt: { gte: weekAgo } } }),
+    prisma.chatSession.count({ where: { AND: [realChat, { startedAt: { gte: dayAgo } }] } }),
+    prisma.chatSession.count({ where: { AND: [realChat, { startedAt: { gte: weekAgo } }] } }),
+    prisma.report.count({ where: { AND: [{ reporter: realUser }, { createdAt: { gte: weekAgo } }] } }),
     prisma.coinOrder.findMany({
+      where: { user: realUser },
       orderBy: { createdAt: "desc" },
       take: 20,
       include: { user: { select: { username: true, email: true } } },
@@ -190,7 +230,9 @@ async function loadFromDatabase(now: number) {
   for (const row of orderGroups) byStatus[row.status] = row._count._all;
 
   return {
-    users: { total, today, week, premium, banned },
+    // `synthetic` is reported rather than hidden: a dashboard that quietly
+    // drops rows is as misleading as one that quietly counts them.
+    users: { total, today, week, premium, banned, synthetic },
     money: {
       grossPaise: approvedSum._sum.amountPaise ?? 0,
       byStatus,

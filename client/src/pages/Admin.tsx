@@ -51,7 +51,15 @@ interface Overview {
     queuedStandard: number;
     oldestWaitMs: number;
   };
-  users: { total: number; today: number; week: number; premium: number; banned: number };
+  users: {
+    total: number;
+    today: number;
+    week: number;
+    premium: number;
+    banned: number;
+    /** Accounts under reserved domains — this project testing itself. */
+    synthetic: number;
+  };
   money: {
     grossPaise: number;
     byStatus: Record<string, number>;
@@ -220,6 +228,21 @@ export default function Admin() {
         <Stat label="New this week" value={users.week} />
         <Stat label="Premium now" value={users.premium} />
       </Grid>
+
+      {/*
+        * Said out loud rather than quietly dropped.
+        *
+        * These counts exclude accounts on reserved domains, which is every
+        * account the test scripts create. Before that, the page read "452
+        * accounts, 134 new today" when five were people — a report on the test
+        * suite, presented as a report on the business.
+        */}
+      {users.synthetic > 0 && (
+        <p className="-mt-4 mb-7 text-xs text-ink-400">
+          Excludes {users.synthetic.toLocaleString("en-IN")} test account
+          {users.synthetic === 1 ? "" : "s"} created by the probe and smoke scripts.
+        </p>
+      )}
 
       <Grid title="Use">
         <Stat label="Calls today" value={chats.today} />
