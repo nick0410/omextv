@@ -1,0 +1,88 @@
+import { randomUUID } from "crypto";
+
+import { env } from "../../config/env";
+import { stores } from "../store";
+import { detach } from "../../utils/detach";
+import { AuthedSocket, getIo, messageLimiter, signalLimiter } from "./context";
+
+/**
+ * Everything that travels between two people already in a room: the WebRTC
+ * handshake, the text chat, and the typing indicator.
+ */
+
+/**
+ * Relay an SDP/ICE payload to the other member of the room.
+ *
+ * Membership is checked against our own pairing registry rather than against
+ * socket.io rooms: a client could previously emit into any roomId it guessed
+ * and inject signalling into strangers' calls.
+ */
+export function onSignal(socket: AuthedSocket, event: string, payload: unknown): void {
+  const user = socket.user;
+
+  const limit = signalLimiter.consume(user.id);
+  if (!limit.allowed) return;
+
+  if (typeof payload !== "object" || payload === null) return;
+  const { roomId } = payload as { roomId?: unknown };
+  if (typeof roomId !== "string") return;
+
+  detach((async () => {
+    const store = stores();
+    if (!(await store.pairing.isMember(user.id, roomId))) {
+      socket.emit("signal-rejected", { code: "not_a_member", roomId });
+      return;
+    }
+    await store.pairing.touch(roomId, Date.now());
+    socket.to(roomId).emit(event, { ...(payload as object), from: user.id });
+  })(), "socket:background");
+}
+
+export function onChatMessage(socket: AuthedSocket, payload: unknown): void {
+  const user = socket.user;
+
+  if (typeof payload !== "object" || payload === null) return;
+  const { roomId, text } = payload as { roomId?: unknown; text?: unknown };
+
+  if (typeof roomId !== "string" || typeof text !== "string") return;
+
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return;
+
+  const limit = messageLimiter.consume(user.id);
+  if (!limit.allowed) {
+    socket.emit("message-rejected", {
+      code: "rate_limited",
+      retryAfterMs: limit.retryAfterMs,
+    });
+    return;
+  }
+
+  const message = {
+    id: randomUUID(),
+    senderId: user.id,
+    senderName: user.username,
+    text: trimmed.slice(0, env.MAX_MESSAGE_LENGTH),
+    timestamp: Date.now(),
+  };
+
+  detach((async () => {
+    const store = stores();
+    if (!(await store.pairing.isMember(user.id, roomId))) {
+      socket.emit("message-rejected", { code: "not_a_member" });
+      return;
+    }
+    await store.pairing.noteMessage(roomId, Date.now());
+    getIo()?.to(roomId).emit("chat-message", message);
+  })(), "socket:background");
+}
+
+export function onTyping(socket: AuthedSocket, payload: unknown): void {
+  if (typeof payload !== "object" || payload === null) return;
+  const { roomId, isTyping } = payload as { roomId?: unknown; isTyping?: unknown };
+  if (typeof roomId !== "string") return;
+  detach((async () => {
+    if (!(await stores().pairing.isMember(socket.user.id, roomId))) return;
+    socket.to(roomId).emit("typing", { userId: socket.user.id, isTyping: isTyping === true });
+  })(), "socket:background");
+}
