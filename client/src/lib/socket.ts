@@ -12,13 +12,28 @@ export function getSocket(): Socket {
       auth: { token },
       transports: ["websocket", "polling"],
       reconnection: true,
-      reconnectionAttempts: 5,
+      /*
+       * Long enough to outlast a cold start.
+       *
+       * Five tries a second apart gave up after five seconds. The API sleeps
+       * after fifteen idle minutes and takes about a minute to come back, so
+       * the socket was guaranteed to stop trying while the server was still
+       * starting — and then sat there, connected to nothing, with the page
+       * insisting it was offline.
+       *
+       * The delay grows so a genuinely dead server is not hammered for two
+       * minutes at one request a second.
+       */
+      reconnectionAttempts: 20,
       reconnectionDelay: 1000,
+      reconnectionDelayMax: 8000,
+      timeout: 30_000,
     });
 
-    // Reconnection gives up after five tries, and the host it was given is
-    // fixed for the life of the connection. Both are fine when the API has a
-    // stable address; neither is, here.
+    // Reconnection does eventually give up, and the host it was given is
+    // fixed for the life of the connection. Neither matters while the API
+    // keeps one address; both did while it lived behind a tunnel whose
+    // hostname changed on every restart, and would again if it ever moves.
     socket.io.on("reconnect_failed", () => {
       void healIfMoved();
     });

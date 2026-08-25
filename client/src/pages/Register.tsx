@@ -7,6 +7,7 @@ import { CountryPicker } from "../components/CountryPicker";
 import { COUNTRY_CODES, countryFlag, countryName } from "../lib/countries";
 import type { Gender } from "../lib/types";
 import { LegalFooter } from "../components/LegalFooter";
+import { WakingNotice } from "../components/WakingNotice";
 
 const GENDERS: { value: Gender; label: string }[] = [
   { value: "female", label: "Female" },
@@ -206,6 +207,7 @@ export default function Register() {
         onChange={(next) => set("country")(next[0] ?? "")}
       />
 
+      <WakingNotice />
       <LegalFooter />
     </div>
   );

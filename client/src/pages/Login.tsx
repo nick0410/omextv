@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../store/authStore";
 import { Logo } from "../components/Logo";
 import { LegalFooter } from "../components/LegalFooter";
+import { WakingNotice } from "../components/WakingNotice";
 
 const field =
   "w-full rounded-xl bg-ink-100 px-3.5 py-2.5 text-sm text-ink-900 " +
@@ -91,6 +92,7 @@ export default function Login() {
           </p>
         </form>
 
+        <WakingNotice />
         <LegalFooter />
       </div>
     </div>

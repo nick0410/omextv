@@ -7,8 +7,18 @@
 #
 #   powershell -File scripts/status.ps1
 
+# Which API to ask about.
+#
+# Empty means the laptop setup: localhost plus whatever tunnel is in front of
+# it. Given a URL, that whole layer is skipped — a hosted API has one address
+# and none of the tunnel checks mean anything against it.
+param([string]$ApiUrl = "")
+
 $ErrorActionPreference = 'Continue'
 $bad = 0
+
+$hosted = -not [string]::IsNullOrWhiteSpace($ApiUrl)
+$apiBase = if ($hosted) { $ApiUrl.TrimEnd('/') } else { 'http://localhost:3001' }
 
 # Read the published config, whichever way it comes back.
 #
@@ -39,33 +49,44 @@ function Probe($label, $block) {
 }
 
 Write-Host ''
-Probe 'API (localhost)' { (Invoke-RestMethod 'http://localhost:3001/health' -TimeoutSec 8).store }
+$apiLabel = if ($hosted) { 'API (hosted)' } else { 'API (localhost)' }
+# A free instance may be asleep and this request is what wakes it, which takes
+# about a minute. Reporting that as "down" would be wrong every first check.
+$apiTimeout = if ($hosted) { 90 } else { 8 }
+Probe $apiLabel { (Invoke-RestMethod "$apiBase/health" -TimeoutSec $apiTimeout).store }
 Probe 'database' {
   # The API reports this itself now. It used to answer "ok" with Postgres
   # stopped, because /health only pinged Redis — so every login returned a 500
   # while the health check said the instance was fine.
-  $s = Invoke-RestMethod 'http://localhost:3001/health' -TimeoutSec 10
+  $s = Invoke-RestMethod "$apiBase/health" -TimeoutSec $apiTimeout
   if (-not $s.dbOk) { throw 'the API cannot reach Postgres' }
   'reachable'
 }
+# Only meaningful for the laptop setup. A single hosted instance runs on the
+# memory store deliberately: two instances would each keep their own queue, so
+# Redis arrives with the second instance, not before.
+if (-not $hosted) {
 Probe 'redis' {
   # The API refuses to boot when REDIS_URL is set and Redis is not answering —
   # deliberately, since a silent fall back to per-process memory would split
   # the queue across instances. That makes "is Redis up" a thing to check
   # before wondering why the API will not start.
-  $s = Invoke-RestMethod 'http://localhost:3001/health' -TimeoutSec 8
+  $s = Invoke-RestMethod "$apiBase/health" -TimeoutSec $apiTimeout
   if ($s.store -ne 'redis') { throw "API is using the $($s.store) store" }
   if (-not $s.storeOk) { throw 'store is not answering' }
   'connected'
 }
+}
 Probe 'gender model' {
-  $s = Invoke-RestMethod 'http://localhost:3001/api/stats' -TimeoutSec 8
+  $s = Invoke-RestMethod "$apiBase/api/stats" -TimeoutSec $apiTimeout
   if (-not $s.genderReady) { throw "not ready ($($s.genderProvider))" }
   $s.genderProvider
 }
 
-$log = Join-Path $env:TEMP 'omextv-tunnel.log'
+# The tunnel only exists for the laptop setup.
 $url = $null
+if (-not $hosted) {
+$log = Join-Path $env:TEMP 'omextv-tunnel.log'
 if (Test-Path $log) {
   $m = Select-String -Path $log -Pattern 'https://[a-z0-9]+(?:-[a-z0-9]+){2,}\.trycloudflare\.com' | Select-Object -First 1
   if ($m) { $url = $m.Matches[0].Value }
@@ -93,12 +114,15 @@ if (-not $url) {
   }
 }
 
+}
+
 Probe 'site' {
   $r = Invoke-WebRequest 'https://omextv.vercel.app/register' -TimeoutSec 30 -UseBasicParsing
   "HTTP $($r.StatusCode)"
 }
 
-if ($url) {
+$expected = if ($hosted) { $apiBase } else { $url }
+if ($expected) {
   # What visitors will actually dial.
   #
   # This used to grep the deployed JS bundle for the hostname, which stopped
@@ -109,14 +133,14 @@ if ($url) {
   Probe 'published config' {
     $raw = 'https://raw.githubusercontent.com/nick0410/omextv/main/runtime-config.json'
     $doc = Read-PublishedConfig "${raw}?t=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
-    if ($doc.apiUrl -ne $url) {
+    if ($doc.apiUrl -ne $expected) {
       # raw.githubusercontent.com leaves the query string out of its cache key,
       # so for up to five minutes after a tunnel restart this genuinely still
       # serves the old hostname. Worth saying plainly rather than reporting it
       # as a mismatch someone needs to fix.
-      throw "names $($doc.apiUrl); if the tunnel just restarted, give the CDN five minutes"
+      throw "names $($doc.apiUrl), expected $expected; the CDN caches this for five minutes"
     }
-    'matches the live tunnel'
+    if ($hosted) { 'matches the hosted API' } else { 'matches the live tunnel' }
   }
 }
 
@@ -124,6 +148,7 @@ Write-Host ''
 if ($bad -eq 0) {
   Write-Host 'Everything is live.' -ForegroundColor Green
 } else {
-  Write-Host "$bad component(s) down. Fix with: powershell -File scripts/tunnel.ps1" -ForegroundColor Yellow
+  $fix = if ($hosted) { 'check the Render dashboard' } else { 'powershell -File scripts/tunnel.ps1' }
+  Write-Host "$bad component(s) down. Fix with: $fix" -ForegroundColor Yellow
 }
 exit $bad
