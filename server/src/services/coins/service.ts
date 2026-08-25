@@ -102,6 +102,19 @@ export class CoinService {
     return premium ? this.premiumIsLive(premium) : false;
   }
 
+  /**
+   * Take the price of one call, if they can pay it.
+   *
+   * Returns whether it happened. A balance that has been spent elsewhere since
+   * the match was made is not an error and must not interrupt anyone: the call
+   * goes on, unpaid. Cutting somebody off mid-sentence over fifty coins would
+   * cost more than the fifty coins.
+   */
+  async chargeForCall(userId: string, amount: number, roomId: string): Promise<boolean> {
+    const balance = await this.repos.wallet.debit(userId, amount, "call", roomId);
+    return balance !== null;
+  }
+
   ordersFor(userId: string): Promise<CoinOrderRecord[]> {
     return this.repos.orders.listForUser(userId, ORDER_PAGE);
   }

@@ -19,6 +19,7 @@
     "migrate:dev": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
     "razorpay:check": "node scripts/razorpay-check.mjs",
+    "calls:check": "node scripts/call-charge-check.mjs",
     "coins:check": "node scripts/coin-check.mjs",
     "match:speed": "node scripts/match-speed.mjs",
     "smoke": "node scripts/smoke-match.mjs",

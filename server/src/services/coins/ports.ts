@@ -36,7 +36,11 @@ export const err = <C extends string>(code: C, message: string): { ok: false; co
 
 export type OrderStatus = "awaiting_payment" | "under_review" | "approved" | "rejected";
 
-export type LedgerReason = "purchase" | "pass" | "refund" | "adjustment";
+/**
+ * Why a balance moved. "call" is a per-call charge for choosing who you met;
+ * "pass" is buying a period of unlimited choosing.
+ */
+export type LedgerReason = "purchase" | "pass" | "call" | "refund" | "adjustment";
 
 export interface CoinOrderRecord {
   id: string;

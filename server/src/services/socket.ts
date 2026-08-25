@@ -21,6 +21,11 @@ import { parseMatchFilters, genderVerifySchema } from "../utils/validation";
 import { applyEntitlement } from "./coins/entitlement";
 import { coins } from "./coins";
 import {
+  CALL_CHARGE_AFTER_MS,
+  CALL_CHARGE_COINS,
+  owesForCall,
+} from "./coins/callCharge";
+import {
   JWTPayload,
   QueueEntry,
   MatchResult,
@@ -50,6 +55,68 @@ const signalLimiter = new RateLimiter(env.SIGNALS_PER_MIN, env.SIGNALS_PER_MIN /
 
 /** Users whose socket dropped while paired, awaiting a reconnect. */
 const reconnectTimers = new Map<string, NodeJS.Timeout>();
+
+/**
+ * Calls that will be charged for once they have lasted long enough.
+ *
+ * Keyed by room so a call that ends early can cancel its own charge. Losing
+ * these on a restart costs a charge, which is the right direction to fail:
+ * nobody is billed for a call the server has forgotten.
+ */
+const callChargeTimers = new Map<string, NodeJS.Timeout>();
+
+/** Stop a pending charge, for a call that did not last. */
+function cancelCallCharge(roomId: string): void {
+  const timer = callChargeTimers.get(roomId);
+  if (!timer) return;
+  clearTimeout(timer);
+  callChargeTimers.delete(roomId);
+}
+
+/**
+ * Bill whoever chose, once the call has run long enough to count.
+ *
+ * Scheduled rather than charged at teardown so the price is paid at the moment
+ * the threshold passes. Charging on teardown would mean a call the server
+ * never sees end — a crash, a lost socket — is free, and would also let
+ * somebody hang up at fourteen seconds forever.
+ */
+function scheduleCallCharge(match: MatchResult): void {
+  const owing = [
+    owesForCall(match.a, match.b) ? match.a : null,
+    owesForCall(match.b, match.a) ? match.b : null,
+  ].filter(Boolean) as QueueEntry[];
+
+  if (owing.length === 0) return;
+
+  const timer = setTimeout(() => {
+    callChargeTimers.delete(match.roomId);
+    for (const entry of owing) {
+      detach(
+        (async () => {
+          const paid = await coins().chargeForCall(
+            entry.userId,
+            CALL_CHARGE_COINS,
+            match.roomId,
+          );
+          // Not an error. A balance spent elsewhere since the match was made
+          // means the call goes on unpaid rather than being interrupted.
+          if (!paid) return;
+
+          await emitToUser(entry.userId, "coins-charged", {
+            amount: CALL_CHARGE_COINS,
+            reason: "call",
+            roomId: match.roomId,
+          });
+        })(),
+        "socket:call-charge",
+      );
+    }
+  }, CALL_CHARGE_AFTER_MS);
+
+  timer.unref?.();
+  callChargeTimers.set(match.roomId, timer);
+}
 
 /** Channel used to hand an event to whichever instance owns the socket. */
 const BUS_CHANNEL = "omextv:emit";
@@ -412,8 +479,16 @@ async function onJoinQueue(socket: AuthedSocket, payload: unknown): Promise<void
    */
   user.isPremium = await coins().isPremiumNow(user.id);
 
+  /*
+   * The balance decides too, now that a gender filter can be paid for per
+   * call rather than only by holding a pass. Read at the same moment as the
+   * pass for the same reason: both change while a socket is open.
+   */
+  const wallet = await coins().walletFor(user.id);
+  const balance = wallet?.coins ?? 0;
+
   const requested = parseMatchFilters(payload);
-  const { filters, dropped } = applyEntitlement(requested, user.isPremium);
+  const { filters, dropped } = applyEntitlement(requested, user.isPremium, balance);
   if (dropped.length > 0) {
     socket.emit("filters-restricted", {
       dropped,
@@ -561,6 +636,8 @@ async function establishMatch(match: MatchResult, depth = 0): Promise<void> {
     waitedMs: match.matchedOn.bWaitedMs,
     relaxStage: match.stage,
   });
+
+  scheduleCallCharge(match);
 }
 
 /** What the other person is allowed to learn about you. Never the email. */
@@ -690,6 +767,11 @@ async function teardownPair(
   reason: EndReason,
   endedById: string | null,
 ): Promise<void> {
+  // A call that ends before the threshold is not charged for. Cancelling here
+  // rather than checking at fire time keeps the rule in one place: the timer
+  // firing *is* the call having lasted.
+  cancelCallCharge(roomId);
+
   const pair = await stores().pairing.end(roomId);
   if (!pair) return;
 

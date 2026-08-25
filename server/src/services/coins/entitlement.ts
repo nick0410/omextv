@@ -1,4 +1,5 @@
 import { MatchFilters } from "../../types";
+import { mayChooseGender } from "./callCharge";
 
 /**
  * What a free account is allowed to ask for.
@@ -41,11 +42,27 @@ export function restrictedParts(filters: MatchFilters): Array<"gender" | "countr
 export function applyEntitlement(
   filters: MatchFilters,
   isPremium: boolean,
+  coins = 0,
 ): { filters: MatchFilters; dropped: Array<"gender" | "country"> } {
   if (isPremium) return { filters, dropped: [] };
 
   const dropped = restrictedParts(filters);
   if (dropped.length === 0) return { filters, dropped };
+
+  /*
+   * Enough coins to pay for one call buys the gender filter for that call.
+   *
+   * A pass used to be the only way in, which left anyone holding coins unable
+   * to spend them on the thing the coins are for. Countries stay behind the
+   * pass: there is no per-call price for them, so there is nothing to charge.
+   */
+  if (mayChooseGender(isPremium, coins) && filters.gender !== "any") {
+    const stillDropped = dropped.filter((part) => part !== "gender");
+    return {
+      filters: { ...FREE_FILTERS, gender: filters.gender },
+      dropped: stillDropped,
+    };
+  }
 
   return { filters: { ...FREE_FILTERS }, dropped };
 }

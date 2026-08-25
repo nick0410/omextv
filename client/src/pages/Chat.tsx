@@ -14,6 +14,7 @@ import { Logo } from "../components/Logo";
 import { useGenderDetect } from "../hooks/useGenderDetect";
 import { DEFAULT_FILTERS, oppositeGender } from "../lib/types";
 import type { MatchFilters } from "../lib/types";
+import { getSocket } from "../lib/socket";
 
 const FILTERS_KEY = "omextv.filters";
 
@@ -78,7 +79,25 @@ export default function Chat() {
    * sight — otherwise the first time you learn you are out is when something
    * refuses to work.
    */
-  const { wallet } = useWallet();
+  const { wallet, refresh: refreshWallet } = useWallet();
+
+  /*
+   * Show the balance dropping when it drops.
+   *
+   * The server charges for a call once it has run long enough, and without
+   * this the coins simply disappear — the number in the header stays stale
+   * until the page is reloaded. Money leaving silently is the worst way for a
+   * paid feature to behave, and the first thing anyone would write in to
+   * complain about.
+   */
+  useEffect(() => {
+    const socket = getSocket();
+    const onCharged = () => void refreshWallet();
+    socket.on("coins-charged", onCharged);
+    return () => {
+      socket.off("coins-charged", onCharged);
+    };
+  }, [refreshWallet]);
   const logout = useAuthStore((s) => s.logout);
   const [filters, setFilters] = useState<MatchFilters>(loadFilters);
   const [showReport, setShowReport] = useState(false);
