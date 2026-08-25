@@ -86,7 +86,22 @@ export const requireAdmin = asyncRoute(async function requireAdmin(
     select: { email: true },
   });
 
-  if (!user || !env.ADMIN_EMAILS.includes(user.email.toLowerCase())) {
+  /*
+   * Compared exactly, not lowercased first.
+   *
+   * Lowercasing here was the escalation. Addresses were stored as typed and
+   * Postgres compares by bytes, so the uppercase spelling of the
+   * administrator's address was an ordinary separate account — and this line
+   * folded it into a match, handing over the review queue: the power to
+   * approve payments and credit any balance. The address is on the contact
+   * page, so knowing it was never the obstacle.
+   *
+   * Addresses are normalised on the way in now, so a real account already
+   * arrives lowercase and this comparison is exact for everyone entitled to
+   * pass it. Anything still carrying capitals did not come through the front
+   * door, which is reason enough to refuse it.
+   */
+  if (!user || !env.ADMIN_EMAILS.includes(user.email)) {
     res.status(403).json({ error: "Not permitted" });
     return;
   }

@@ -15,8 +15,35 @@ const countrySchema = z
 
 const citySchema = z.string().trim().min(1).max(85); // longest real place name is 85 chars
 
+/**
+ * An email address, in one canonical form.
+ *
+ * Addresses used to be stored exactly as typed, and Postgres compares strings
+ * by bytes — so "Someone@example.com" was a different account from
+ * "someone@example.com". Two problems came out of that, and the second is the
+ * reason this exists.
+ *
+ * The small one: signing up twice with different capitalisation produced two
+ * accounts, and signing in with the wrong one failed for no visible reason.
+ *
+ * The serious one: the administrator check lowercased before comparing against
+ * ADMIN_EMAILS. Registering the uppercase spelling of the administrator's
+ * address created an ordinary, separate account that the check then accepted —
+ * full access to the review queue, which is the ability to approve payments
+ * and credit any balance. The address is published on the contact page, so
+ * knowing it was never the hard part. Verified by doing it.
+ *
+ * Normalising here rather than at each call site means a new endpoint cannot
+ * forget.
+ */
+const emailSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .email("Invalid email");
+
 export const registerSchema = z.object({
-  email: z.string().email("Invalid email"),
+  email: emailSchema,
   password: z
     .string()
     .min(8, "Password must be at least 8 characters")
@@ -28,7 +55,7 @@ export const registerSchema = z.object({
 });
 
 export const loginSchema = z.object({
-  email: z.string().email("Invalid email"),
+  email: emailSchema,
   password: z.string().min(1, "Password is required"),
 });
 
