@@ -2,7 +2,14 @@ import { env } from "../../config/env";
 import * as matcher from "../matchmaking/matcher";
 import { stores } from "../store";
 import { detach } from "../../utils/detach";
-import { AuthedSocket, getIo, reconnectTimers } from "./context";
+import { prisma } from "../../config/database";
+import {
+  AuthedSocket,
+  LAST_SEEN_THROTTLE_MS,
+  getIo,
+  lastSeenWrites,
+  reconnectTimers,
+} from "./context";
 import { emitToUser } from "./delivery";
 import { livePairFor, onLeaveChat, teardownPair } from "./pairs";
 import { onJoinQueue, onLeaveQueue } from "./queue";
@@ -50,6 +57,8 @@ export async function onConnection(socket: AuthedSocket): Promise<void> {
   registerHandlers(socket, ready);
   await ready;
 
+  markSeen(user.id);
+
   // Cancel a pending reconnect teardown — they made it back in time.
   const pendingTimer = reconnectTimers.get(user.id);
   if (pendingTimer) {
@@ -84,6 +93,37 @@ export async function onConnection(socket: AuthedSocket): Promise<void> {
     });
     await emitToUser(partnerId, "partner-reconnected", { roomId: existingPair.roomId });
   }
+}
+
+/**
+ * Record that this person was here.
+ *
+ * The column existed from the first migration and nothing ever wrote to it, so
+ * it read null for every account that had ever signed in — which made it
+ * impossible to tell a customer who came back from one who registered once and
+ * left. Connecting a socket is the honest signal: reaching it means they got
+ * past the login screen and into the app.
+ *
+ * Deliberately not awaited. Whether a call succeeds changes a statistic, not
+ * whether somebody can use the app, so it must never delay a connection or
+ * fail one.
+ */
+function markSeen(userId: string): void {
+  const now = Date.now();
+  const written = lastSeenWrites.get(userId) ?? 0;
+  if (now - written < LAST_SEEN_THROTTLE_MS) return;
+  lastSeenWrites.set(userId, now);
+
+  detach(
+    prisma.user
+      .update({ where: { id: userId }, data: { lastSeenAt: new Date(now) } })
+      .then(() => undefined)
+      .catch(() => {
+        // Let the next connection try again rather than holding the slot.
+        lastSeenWrites.delete(userId);
+      }),
+    "socket:last-seen",
+  );
 }
 
 function registerHandlers(socket: AuthedSocket, ready: Promise<void>): void {

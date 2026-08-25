@@ -49,6 +49,16 @@ export const reconnectTimers = new Map<string, NodeJS.Timeout>();
 export const callChargeTimers = new Map<string, NodeJS.Timeout>();
 
 /**
+ * When each user's lastSeenAt was last written.
+ *
+ * Throttled because reconnects are not rare — a dropped tunnel reconnects
+ * every socket at once, and none of those are worth a row update. Held in
+ * memory on purpose: losing it on restart costs one redundant write per user.
+ */
+export const lastSeenWrites = new Map<string, number>();
+export const LAST_SEEN_THROTTLE_MS = 5 * 60_000;
+
+/**
  * The running server.
  *
  * Behind functions rather than exported directly: an exported `let` is copied

@@ -8,7 +8,7 @@ import { genderService } from "../gender/service";
 import { detach } from "../../utils/detach";
 import { AuthedSocket, BUS_CHANNEL, getIo, setIo } from "./context";
 import { messageLimiter, queueLimiter, reconnectTimers, signalLimiter } from "./context";
-import { callChargeTimers } from "./context";
+import { LAST_SEEN_THROTTLE_MS, callChargeTimers, lastSeenWrites } from "./context";
 import { authMiddleware } from "./auth";
 import { onConnection } from "./session";
 import { teardownPair } from "./pairs";
@@ -126,6 +126,13 @@ function startTimers(): void {
       queueLimiter.sweep();
       messageLimiter.sweep();
       signalLimiter.sweep();
+
+      // One entry per user who has ever connected, otherwise it only grows.
+      // Dropping an expired one costs at most a redundant write.
+      const staleBefore = Date.now() - LAST_SEEN_THROTTLE_MS;
+      for (const [userId, at] of lastSeenWrites) {
+        if (at < staleBefore) lastSeenWrites.delete(userId);
+      }
       detach(stores().pairing.sweepRecent(60 * 60_000, Date.now()), "socket:sweep-recent");
 
       if (env.CHAT_IDLE_TIMEOUT_MS > 0) {
@@ -156,6 +163,21 @@ export async function shutdownSocket(): Promise<void> {
 
   for (const timer of reconnectTimers.values()) clearTimeout(timer);
   reconnectTimers.clear();
+
+  /*
+   * Cancel pending charges rather than letting them fire.
+   *
+   * Below, every pair is torn down. A charge timer that outlives that would
+   * come due for a call this server no longer has any record of, and bill a
+   * real balance for it. When the process exits these die with it either
+   * way; when it does not — a test suite calling shutdown between cases, a
+   * restart in place — they used to survive and charge.
+   *
+   * Not charging for an interrupted call is the right direction to fail.
+   */
+  for (const timer of callChargeTimers.values()) clearTimeout(timer);
+  callChargeTimers.clear();
+  lastSeenWrites.clear();
 
   const pairs = await stores().pairing.allPairs();
   await Promise.allSettled(
