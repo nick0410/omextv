@@ -64,11 +64,13 @@ describe("filtersAccept", () => {
 
 describe("stageFor", () => {
   it("advances at each configured threshold", () => {
+    // Tightened from 20s/60s. A minute of nothing before the ladder finished
+    // was the difference between a chat app and a waiting room.
     expect(stageFor(0)).toBe(0);
-    expect(stageFor(19_999)).toBe(0);
-    expect(stageFor(20_000)).toBe(1);
-    expect(stageFor(59_999)).toBe(1);
-    expect(stageFor(60_000)).toBe(2);
+    expect(stageFor(7_999)).toBe(0);
+    expect(stageFor(8_000)).toBe(1);
+    expect(stageFor(19_999)).toBe(1);
+    expect(stageFor(20_000)).toBe(2);
     expect(stageFor(10 * 60_000)).toBe(2);
   });
 
@@ -158,11 +160,21 @@ describe("isCompatible", () => {
       expect(isCompatible(a, b, 1, T0)).toBe(true); //  5 min window
     });
 
-    it("drops the rule entirely at stage 2", () => {
+    it("keeps a short floor even at the last stage", () => {
+      /*
+       * Not dropped entirely any more. Being handed back the person you
+       * skipped a moment ago reads as the skip having been ignored, and with
+       * only two people online that is exactly what "match anyone" would do.
+       *
+       * Twenty seconds: long enough that the skip meant something, short
+       * enough that it is not the wait people complained about.
+       */
       const a = makeEntry({ userId: "a", recent: { b: T0 - 1_000 } });
       const b = makeEntry({ userId: "b" });
-      expect(isCompatible(a, b, 1, T0)).toBe(false);
-      expect(isCompatible(a, b, 2, T0)).toBe(true);
+      expect(isCompatible(a, b, 2, T0)).toBe(false);
+
+      const older = makeEntry({ userId: "a", recent: { b: T0 - 21_000 } });
+      expect(isCompatible(older, b, 2, T0)).toBe(true);
     });
   });
 
@@ -435,19 +447,41 @@ describe("MatchmakingEngine", () => {
     });
 
     it("pairs two users who only become compatible once relaxed", () => {
-      // They just talked, so stage 0 and 1 both refuse the rematch.
+      /*
+       * Two people alone skip straight to the last stage — there is no better
+       * match to hold out for, so the ladder's whole premise is absent. What
+       * still applies is the floor on rematching the person just left.
+       */
       const a = makeEntry({ userId: "a", recent: { b: T0 }, joinedAt: T0 });
       const b = makeEntry({ userId: "b", recent: { a: T0 }, joinedAt: T0 });
       engine.joinQueue(a, T0);
       engine.joinQueue(b, T0);
 
       expect(engine.sweep(T0 + 1_000)).toHaveLength(0);
-      expect(engine.sweep(T0 + 30_000)).toHaveLength(0);
 
-      const matches = engine.sweep(T0 + 61_000);
+      const matches = engine.sweep(T0 + 21_000);
       expect(matches).toHaveLength(1);
       expect(matches[0].stage).toBe(2);
       expect(engine.size).toBe(0);
+    });
+
+    it("pairs strangers in a small room without waiting at all", () => {
+      /*
+       * The case the ladder used to punish: nobody has met, so there is
+       * nothing to relax and no reason to wait.
+       *
+       * The pair happens on the join itself, not on a later sweep — which is
+       * why the queue is empty afterwards and the sweep has nothing to do.
+       */
+      const a = makeEntry({ userId: "a", joinedAt: T0 });
+      const b = makeEntry({ userId: "b", joinedAt: T0 });
+
+      expect(engine.joinQueue(a, T0)).toBeNull();
+      const match = engine.joinQueue(b, T0);
+
+      expect(match).not.toBeNull();
+      expect(engine.size).toBe(0);
+      expect(engine.sweep(T0)).toHaveLength(0);
     });
 
     it("never returns the same user in two matches", () => {

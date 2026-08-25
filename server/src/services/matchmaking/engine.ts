@@ -19,9 +19,44 @@ import {
  */
 export const RELAX_STAGES = [
   { afterMs: 0, recentPartnerWindowMs: 30 * 60_000, enforceCity: true },
-  { afterMs: 20_000, recentPartnerWindowMs: 5 * 60_000, enforceCity: false },
-  { afterMs: 60_000, recentPartnerWindowMs: 0, enforceCity: false },
+  { afterMs: 8_000, recentPartnerWindowMs: 60_000, enforceCity: false },
+  // Not zero. Even with nobody else to choose from, being handed back the
+  // person you just skipped reads as the skip having been ignored — so the
+  // last stage still keeps a short floor. With anyone else available the
+  // match is instant; with nobody, this is the whole wait.
+  { afterMs: 20_000, recentPartnerWindowMs: 20_000, enforceCity: false },
 ] as const;
+
+/**
+ * Below this many people to choose from, holding out for a better match is
+ * holding out for nothing.
+ *
+ * The ladder trades match quality for waiting time, which is the right trade
+ * in a crowd. In a room of three it is not a trade at all: refusing the only
+ * person available does not produce a better partner later, it produces no
+ * partner. Someone skipping then sat through the full ladder before the
+ * person they had just left became eligible again — every skip cost a minute,
+ * which is the single thing that made the product feel broken.
+ */
+export const SMALL_POOL = 6;
+
+/**
+ * How relaxed to be, given both how long someone has waited and how many
+ * people there are to wait for.
+ *
+ * Time alone was the input before, and time alone cannot tell the difference
+ * between a busy night and an empty one.
+ */
+export function effectiveStage(waitedMs: number, candidateCount: number): number {
+  const byTime = stageFor(waitedMs);
+  const last = RELAX_STAGES.length - 1;
+
+  // Two or fewer means the seeker and at most one other. There is nothing to
+  // choose between, so choose immediately.
+  if (candidateCount <= 2) return last;
+  if (candidateCount < SMALL_POOL) return Math.max(byTime, 1);
+  return byTime;
+}
 
 export function stageFor(waitedMs: number): number {
   let stage = 0;
@@ -179,12 +214,18 @@ export function selectPartner(
   lanes: { premium: QueueEntry[]; standard: QueueEntry[] },
   now: number,
 ): QueueEntry | null {
-  const seekerStage = stageFor(now - seeker.joinedAt);
+  // Everyone in front of the seeker, including the seeker: the number of
+  // people this decision actually has to choose between.
+  const pool = lanes.premium.length + lanes.standard.length;
+  const seekerStage = effectiveStage(now - seeker.joinedAt, pool);
 
   for (const lane of [lanes.premium, lanes.standard]) {
     for (const candidate of lane) {
       if (candidate.userId === seeker.userId) continue;
-      const stage = Math.max(seekerStage, stageFor(now - candidate.joinedAt));
+      const stage = Math.max(
+        seekerStage,
+        effectiveStage(now - candidate.joinedAt, pool),
+      );
       if (isCompatible(seeker, candidate, stage, now)) return candidate;
     }
   }
@@ -300,11 +341,15 @@ export class MatchmakingEngine {
    * a stream of strict newcomers.
    */
   private findPartnerFor(seeker: QueueEntry, now: number): QueueEntry | null {
-    const seekerStage = stageFor(now - seeker.joinedAt);
+    // Same pool-aware stage the store-backed matcher uses. This class is the
+    // reference implementation and the two must not drift: a rule that only
+    // holds in memory is a rule that stops holding the moment Redis is on.
+    const pool = this.size;
+    const seekerStage = effectiveStage(now - seeker.joinedAt, pool);
 
     const predicate = (candidate: QueueEntry): boolean => {
       if (candidate.userId === seeker.userId) return false;
-      const candidateStage = stageFor(now - candidate.joinedAt);
+      const candidateStage = effectiveStage(now - candidate.joinedAt, pool);
       const stage = Math.max(seekerStage, candidateStage);
       return isCompatible(seeker, candidate, stage, now);
     };
@@ -313,7 +358,13 @@ export class MatchmakingEngine {
   }
 
   private buildResult(a: QueueEntry, b: QueueEntry, now: number): MatchResult {
-    const stage = Math.max(stageFor(now - a.joinedAt), stageFor(now - b.joinedAt));
+    // The pair has already been taken out of the lanes, so count them back in:
+    // the stage reported has to be the one the decision was made at.
+    const pool = this.size + 2;
+    const stage = Math.max(
+      effectiveStage(now - a.joinedAt, pool),
+      effectiveStage(now - b.joinedAt, pool),
+    );
     a.relaxStage = stage;
     b.relaxStage = stage;
     return {
@@ -364,10 +415,11 @@ export class MatchmakingEngine {
   }
 
   private findPartnerForExcluding(seeker: QueueEntry, now: number): QueueEntry | null {
-    const seekerStage = stageFor(now - seeker.joinedAt);
+    const pool = this.size;
+    const seekerStage = effectiveStage(now - seeker.joinedAt, pool);
     const predicate = (candidate: QueueEntry): boolean => {
       if (candidate.userId === seeker.userId) return false;
-      const stage = Math.max(seekerStage, stageFor(now - candidate.joinedAt));
+      const stage = Math.max(seekerStage, effectiveStage(now - candidate.joinedAt, pool));
       return isCompatible(seeker, candidate, stage, now);
     };
     return this.premium.takeFirst(predicate) ?? this.standard.takeFirst(predicate);
