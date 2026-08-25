@@ -2,6 +2,14 @@ import express from "express";
 import http from "http";
 import cors from "cors";
 import helmet from "helmet";
+
+/**
+ * Where the untouched webhook body is kept.
+ *
+ * Declared against IncomingMessage rather than Express's Request because the
+ * body parser's verify hook runs before Express has wrapped it.
+ */
+export type WithRawBody = { rawBody?: Buffer };
 import cookieParser from "cookie-parser";
 import path from "path";
 
@@ -52,7 +60,27 @@ app.use(
   }),
 );
 // Gender frames are base64 and can approach the 2 MB decoded cap.
-app.use(express.json({ limit: "6mb" }));
+/*
+ * Keep the untouched bytes of a webhook body.
+ *
+ * A gateway signs exactly what it sent. Re-serialising the parsed JSON
+ * reorders keys and changes whitespace, so the digest stops matching and every
+ * genuine webhook is rejected — which fails safe but silently stops all
+ * automatic crediting, and looks like the gateway never called.
+ *
+ * Only for the webhook paths: stashing a copy of every request body would mean
+ * holding a second copy of each 6 MB frame of camera data.
+ */
+app.use(
+  express.json({
+    limit: "6mb",
+    verify: (req, _res, buf) => {
+      if (req.url?.startsWith("/api/coins/webhook/")) {
+        (req as typeof req & WithRawBody).rawBody = Buffer.from(buf);
+      }
+    },
+  }),
+);
 app.use(cookieParser());
 
 /**

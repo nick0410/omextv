@@ -169,19 +169,35 @@ export interface CoinOrder {
 }
 
 /**
- * Everything needed to render a payable QR, built by the server.
+ * What the buyer needs in order to pay, built by the server.
  *
- * Named for what it is rather than for UPI: the server picks the payment
- * provider, and a client that hard-codes one in its type names has to be
- * rewritten to accept a second.
+ * A union, mirroring the server: paying by transfer and paying inside a hosted
+ * checkout are different things, not one thing with optional fields. The
+ * `kind` is what the page branches on.
  */
-export interface PaymentInstruction {
-  /** Which provider produced this — "upi" today. */
-  kind: string;
+export type PaymentInstruction = TransferInstruction | GatewayInstruction;
+
+/** Scan or tap a link, then tell us the reference afterwards. */
+export interface TransferInstruction {
+  kind: "transfer";
+  provider: string;
   link: string;
   payee: string;
   payeeName: string;
   amountRupees: string;
+  reference: string;
+}
+
+/** Pay inside the provider's own window; it reports the result to the server. */
+export interface GatewayInstruction {
+  kind: "gateway";
+  provider: string;
+  /** Publishable key. The secret never leaves the server. */
+  keyId: string;
+  gatewayOrderId: string;
+  amountPaise: number;
+  amountRupees: string;
+  currency: string;
   reference: string;
 }
 

@@ -110,6 +110,23 @@ export const env = {
    */
   RAZORPAY_WEBHOOK_SECRET: str("RAZORPAY_WEBHOOK_SECRET"),
 
+  /**
+   * Which provider collects money: "upi" or "razorpay".
+   *
+   * Chosen explicitly rather than inferred from whether keys happen to be
+   * present. Test keys are the normal state of a Razorpay account for days
+   * while activation is reviewed, and "use it if configured" would silently
+   * send real buyers into a test checkout that takes no money and credits
+   * nothing. Switching is a deliberate act.
+   */
+  PAYMENT_PROVIDER: (() => {
+    const raw = str("PAYMENT_PROVIDER", "upi").toLowerCase();
+    if (raw !== "upi" && raw !== "razorpay") {
+      throw new Error(`PAYMENT_PROVIDER must be "upi" or "razorpay", got "${raw}"`);
+    }
+    return raw as "upi" | "razorpay";
+  })(),
+
   // --- Direct UPI ---
   /**
    * The VPA money is collected at, e.g. "yourname@paytm". Empty disables the

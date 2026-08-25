@@ -4,7 +4,14 @@ import QRCode from "qrcode";
 import api from "../lib/axios";
 import { useWallet } from "../hooks/useWallet";
 import { useAuthStore } from "../store/authStore";
-import type { CoinOrder, CoinPack, CoinPass, PaymentInstruction } from "../lib/types";
+import { openCheckout } from "../lib/razorpay";
+import type {
+  CoinOrder,
+  CoinPack,
+  CoinPass,
+  GatewayInstruction,
+  PaymentInstruction,
+} from "../lib/types";
 
 /**
  * Buying coins, and turning them into premium.
@@ -346,6 +353,12 @@ function Checkout({
   onCancel: () => void;
 }) {
   const { order, payment } = checkout;
+
+  // A hosted checkout runs itself; there is no QR to draw and no reference to
+  // ask for, so that whole screen is replaced rather than adapted.
+  if (payment.kind === "gateway") {
+    return <GatewayCheckout order={order} payment={payment} onDone={onDone} onCancel={onCancel} />;
+  }
   const [qr, setQr] = useState<string | null>(null);
   const [reference, setReference] = useState("");
   const [busy, setBusy] = useState(false);
@@ -489,6 +502,130 @@ function Checkout({
       >
         Cancel this order
       </button>
+    </div>
+  );
+}
+
+/**
+ * Paying inside the provider's window.
+ *
+ * Shorter than the transfer flow by exactly the steps the gateway removes: no
+ * reference to copy off a receipt, and nobody checking a bank statement
+ * afterwards. The buyer pays and the coins are there.
+ *
+ * The success handler still asks the server to verify. What the modal reports
+ * is what the browser saw, and the browser is not a trustworthy witness to
+ * money — the signature is. If this request fails the payment is not lost: the
+ * webhook credits it independently, which is what the message says rather than
+ * telling someone their money vanished.
+ */
+function GatewayCheckout({
+  order,
+  payment,
+  onDone,
+  onCancel,
+}: {
+  order: CoinOrder;
+  payment: GatewayInstruction;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [paid, setPaid] = useState(false);
+
+  const pay = async () => {
+    setBusy(true);
+    setProblem(null);
+    try {
+      const outcome = await openCheckout({
+        keyId: payment.keyId,
+        gatewayOrderId: payment.gatewayOrderId,
+        amountPaise: payment.amountPaise,
+        currency: payment.currency,
+        description: `${order.coins.toLocaleString("en-IN")} coins`,
+      });
+
+      if (outcome.status === "dismissed") {
+        // Not an error. Someone changed their mind.
+        return;
+      }
+      if (outcome.status === "failed") {
+        setProblem(outcome.message);
+        return;
+      }
+
+      await api.post(`/coins/orders/${order.id}/verify`, {
+        razorpay_payment_id: outcome.paymentId,
+        razorpay_order_id: outcome.orderId,
+        razorpay_signature: outcome.signature,
+      });
+      setPaid(true);
+    } catch (err) {
+      setProblem(
+        errorFrom(
+          err,
+          "The payment went through but we could not confirm it here. It will be credited " +
+            "automatically in a moment — no need to pay again.",
+        ),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (paid) {
+    return (
+      <div className="rounded-2xl bg-white p-5 ring-1 ring-ink-200">
+        <h2 className="text-lg font-semibold text-ink-900">
+          {order.coins.toLocaleString("en-IN")} coins added
+        </h2>
+        <p className="mt-2 text-sm text-ink-600">
+          Spend them on a premium pass to choose who you meet.
+        </p>
+        <button
+          type="button"
+          onClick={onDone}
+          className="mt-4 min-h-11 rounded-xl bg-brand-500 px-4 text-sm font-medium text-white hover:bg-brand-600"
+        >
+          Done
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl bg-white p-5 ring-1 ring-ink-200">
+      <h2 className="text-lg font-semibold text-ink-900">
+        Pay ₹{payment.amountRupees} for {order.coins.toLocaleString("en-IN")} coins
+      </h2>
+      <p className="mt-2 text-sm text-ink-600">
+        Card, UPI or net banking. Your coins appear as soon as the payment succeeds.
+      </p>
+
+      {problem && (
+        <p className="mt-3 rounded-xl bg-amber-500/10 px-3.5 py-2.5 text-sm text-amber-800">
+          {problem}
+        </p>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={pay}
+          disabled={busy}
+          className="min-h-11 rounded-xl bg-brand-500 px-5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+        >
+          {busy ? "Opening…" : `Pay ₹${payment.amountRupees}`}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="text-sm text-ink-500 hover:text-ink-700"
+        >
+          Not now
+        </button>
+      </div>
     </div>
   );
 }
