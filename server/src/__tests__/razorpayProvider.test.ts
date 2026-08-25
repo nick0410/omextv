@@ -201,6 +201,13 @@ describe("creating the order", () => {
     ).rejects.toThrow(/not configured/);
   });
 
+  it("refuses an amount Razorpay would reject anyway", async () => {
+    // Their floor is one rupee, and hitting it upstream returns an opaque 400.
+    await expect(
+      provider.instructionFor({ id: "cm_1", amountPaise: 99, description: "x" }),
+    ).rejects.toThrow(/at least 100 paise/);
+  });
+
   it("confirms its own payments, which is the point of using it", () => {
     expect(provider.confirmsAutomatically).toBe(true);
   });

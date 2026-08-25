@@ -43,6 +43,18 @@ export class RazorpayPaymentProvider implements PaymentProvider {
   }): Promise<PaymentInstruction> {
     if (!this.isConfigured()) throw new Error("Razorpay is not configured");
 
+    /*
+     * Razorpay refuses anything under one rupee, and its refusal is an opaque
+     * 400 from an upstream call. Catching it here names the cause instead.
+     *
+     * Unreachable today: amounts come from the pack catalogue, which the
+     * client cannot influence. It is here for the day someone adds a
+     * custom-amount top-up and does not think about the floor.
+     */
+    if (order.amountPaise < 100) {
+      throw new Error(`Razorpay requires at least 100 paise, got ${order.amountPaise}`);
+    }
+
     const auth = Buffer.from(`${env.RAZORPAY_KEY_ID}:${env.RAZORPAY_KEY_SECRET}`).toString("base64");
     const response = await fetch("https://api.razorpay.com/v1/orders", {
       method: "POST",
