@@ -6,6 +6,7 @@ import { Logo } from "../components/Logo";
 import { CountryPicker } from "../components/CountryPicker";
 import { COUNTRY_CODES, countryFlag, countryName } from "../lib/countries";
 import type { Gender } from "../lib/types";
+import { LegalFooter } from "../components/LegalFooter";
 
 const GENDERS: { value: Gender; label: string }[] = [
   { value: "female", label: "Female" },
@@ -204,6 +205,8 @@ export default function Register() {
         onClose={() => setPickerOpen(false)}
         onChange={(next) => set("country")(next[0] ?? "")}
       />
+
+      <LegalFooter />
     </div>
   );
 }

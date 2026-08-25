@@ -8,6 +8,7 @@ import Chat from "./pages/Chat";
 import Diagnostics from "./pages/Diagnostics";
 import Coins from "./pages/Coins";
 import Review from "./pages/Review";
+import { Contact, Privacy, Refunds, Terms } from "./pages/Legal";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
@@ -52,6 +53,15 @@ export default function App() {
             </RequireAuth>
           }
         />
+        {/*
+          * Public and unauthenticated on purpose. A payment gateway's review
+          * reads these before it will activate an account, and so does anyone
+          * deciding whether to hand over money.
+          */}
+        <Route path="/terms" element={<Terms />} />
+        <Route path="/privacy" element={<Privacy />} />
+        <Route path="/refunds" element={<Refunds />} />
+        <Route path="/contact" element={<Contact />} />
         <Route path="/diagnostics" element={<Diagnostics />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

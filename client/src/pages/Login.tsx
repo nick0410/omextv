@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../store/authStore";
 import { Logo } from "../components/Logo";
+import { LegalFooter } from "../components/LegalFooter";
 
 const field =
   "w-full rounded-xl bg-ink-100 px-3.5 py-2.5 text-sm text-ink-900 " +
@@ -89,6 +90,8 @@ export default function Login() {
             </Link>
           </p>
         </form>
+
+        <LegalFooter />
       </div>
     </div>
   );
