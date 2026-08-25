@@ -18,6 +18,7 @@
     "gender:check": "tsx scripts/gender-check.ts",
     "migrate:dev": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
+    "razorpay:check": "node scripts/razorpay-check.mjs",
     "coins:check": "node scripts/coin-check.mjs",
     "smoke": "node scripts/smoke-match.mjs",
     "probe": "node scripts/probe.mjs && node scripts/probe2.mjs"
