@@ -1,6 +1,6 @@
 {
     "_comment":  "Where the live API is. Rewritten by scripts/tunnel.ps1; the deployed client reads it at boot so a new tunnel needs no rebuild.",
-    "updatedAt":  "2026-08-25T13:47:02Z",
-    "apiUrl":  "https://purple-arrives-heard-twisted.trycloudflare.com",
-    "socketUrl":  "https://purple-arrives-heard-twisted.trycloudflare.com"
+    "updatedAt":  "2026-08-25T15:54:12Z",
+    "apiUrl":  "https://reviewer-raises-prize-ours.trycloudflare.com",
+    "socketUrl":  "https://reviewer-raises-prize-ours.trycloudflare.com"
 }
