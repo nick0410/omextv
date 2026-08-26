@@ -171,10 +171,21 @@ async function main() {
   const orderId = mine.body && (mine.body.order ? mine.body.order.id : mine.body.id);
   ok("a valid order is accepted", mine.status === 200 || mine.status === 201, `got ${mine.status}`);
   if (orderId) {
+    // A well-formed body on purpose. The earlier version sent the wrong field
+    // name, was refused for that, and counted the refusal as proof that the
+    // ownership check works -- which it never exercised.
+    const good = { paymentRef: "UTR999888777666" };
     const stolen = await call(`/api/coins/orders/${orderId}/reference`, {
-      method: "POST", token: tokenB, body: { reference: "AAAAAAAAAAAA" },
+      method: "POST", token: tokenB, body: good,
     });
-    ok("cannot mark someone else's order paid", stolen.status >= 400, `got ${stolen.status}`);
+    ok("cannot attach a reference to someone else's order", stolen.status >= 400, `got ${stolen.status}`);
+
+    // And the owner can, so the refusal above was about ownership and not
+    // about the request being unacceptable to everyone.
+    const owner = await call(`/api/coins/orders/${orderId}/reference`, {
+      method: "POST", token: tokenA, body: good,
+    });
+    ok("the owner can attach the same reference", owner.status < 400, `got ${owner.status}`);
   }
 
   // --- routes that do not exist -------------------------------------------
