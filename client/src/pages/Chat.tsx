@@ -174,7 +174,21 @@ export default function Chat() {
   ] as const;
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden lg:min-h-dvh lg:h-auto lg:overflow-visible">
+    /*
+     * One screenful, at every size.
+     *
+     * A phone was already held to the viewport; a laptop was let grow and
+     * scroll, on the reasoning that it has the room. It does not: the header,
+     * two video tiles, the filter strip and the control bar came to more than
+     * a 900-tall window, so Start — the only thing a new arrival needs — sat
+     * below the fold with nothing on screen suggesting there was more. The
+     * bigger display had the worse first minute.
+     *
+     * Holding the height here means the stage has a real one to divide up,
+     * which is what lets the tiles size themselves below instead of guessing
+     * with vh.
+     */
+    <div className="flex h-dvh flex-col overflow-hidden">
       <h1 className="sr-only">Omextv video chat</h1>
       <header className="border-b border-ink-200/70 bg-white/80 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-[1400px] items-center justify-between px-5">
@@ -260,8 +274,8 @@ export default function Chat() {
         </div>
       )}
 
-      <main className="mx-auto flex w-full min-h-0 max-w-[1400px] flex-1 flex-col gap-3 px-3 pb-3 pt-3 lg:grid lg:grid-cols-[1fr_340px] lg:gap-6 lg:px-5 lg:py-6">
-        <div className="flex min-h-0 flex-1 flex-col gap-3 lg:gap-6">
+      <main className="mx-auto flex w-full min-h-0 max-w-[1400px] flex-1 flex-col gap-3 px-3 pb-3 pt-3 lg:grid lg:grid-cols-[1fr_340px] lg:gap-6 lg:px-5 lg:py-5">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 lg:gap-4">
           <VideoStage
             localStream={localStream}
             remoteStream={remoteStream}

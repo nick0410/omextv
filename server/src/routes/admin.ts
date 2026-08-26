@@ -108,6 +108,7 @@ router.get(
         coinsOutstanding: 0,
       },
       chats: { today: 0, week: 0, reportsWeek: 0 },
+      people: [] as unknown[],
       recentOrders: [] as unknown[],
     };
 
@@ -191,6 +192,7 @@ async function loadFromDatabase(now: number) {
     chatsWeek,
     reportsWeek,
     recent,
+    people,
   ] = await Promise.all([
     prisma.user.count({ where: realUser }),
     prisma.user.count({ where: { AND: [realUser, { createdAt: { gte: dayAgo } }] } }),
@@ -224,6 +226,37 @@ async function loadFromDatabase(now: number) {
       take: 20,
       include: { user: { select: { username: true, email: true } } },
     }),
+    /*
+     * Everyone who could be a customer, newest first.
+     *
+     * Counts say how many there are; they cannot say who, and with a handful
+     * of real accounts the individuals are the interesting thing — who came
+     * back, who signed up and never returned, who is carrying a balance.
+     *
+     * Capped rather than unbounded: this is one row per person today, and the
+     * cap is what stops the page turning into a database dump the day it is
+     * not.
+     */
+    prisma.user.findMany({
+      where: realUser,
+      orderBy: { createdAt: "desc" },
+      take: 100,
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        gender: true,
+        verifiedGender: true,
+        country: true,
+        coins: true,
+        isPremium: true,
+        premiumExpiry: true,
+        isBanned: true,
+        createdAt: true,
+        lastSeenAt: true,
+        _count: { select: { reportedBy: true } },
+      },
+    }),
   ]);
 
   const byStatus: Record<string, number> = {};
@@ -241,6 +274,22 @@ async function loadFromDatabase(now: number) {
       coinsOutstanding: coinSum._sum.coins ?? 0,
     },
     chats: { today: chatsToday, week: chatsWeek, reportsWeek },
+    people: people.map((u) => ({
+      id: u.id,
+      username: u.username,
+      email: u.email,
+      // Declared and detected are both shown: they disagreeing is the signal.
+      gender: u.gender,
+      verifiedGender: u.verifiedGender,
+      country: u.country,
+      coins: u.coins,
+      // The stored flag lies the moment a pass lapses, so the date decides.
+      isPremium: u.isPremium && (!u.premiumExpiry || u.premiumExpiry.getTime() > now),
+      isBanned: u.isBanned,
+      reportsAgainst: u._count.reportedBy,
+      createdAt: u.createdAt.toISOString(),
+      lastSeenAt: u.lastSeenAt ? u.lastSeenAt.toISOString() : null,
+    })),
     recentOrders: recent.map((o) => ({
       id: o.id,
       username: o.user.username,

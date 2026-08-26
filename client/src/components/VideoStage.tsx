@@ -68,7 +68,16 @@ const TILE_SHELL =
  * way every video call app does it. Two stacked 38vh tiles meant the person
  * you were talking to was tiny and the controls were below the fold.
  *
- * The laptop layout is unchanged: two equal tiles side by side.
+ * A laptop keeps both people visible side by side, but no longer at equal
+ * size. The stranger is the point of the page and you already know what you
+ * look like; giving yourself half the stage spent the largest area on screen
+ * on the least interesting thing in the room. The grid below is weighted
+ * instead, so the person being met is plainly the subject.
+ *
+ * Heights come from the row, not from vh. The stage sits inside a column that
+ * is already bounded by the viewport, so `h-full` divides real leftover space
+ * — where `max-h-[62vh]` was a guess that ignored the header and the controls
+ * and overflowed on a short window.
  *
  * Both breakpoints share one pair of <video> elements. Rendering a separate
  * mobile tree would mean two decoders for the same stream, which phones
@@ -76,15 +85,15 @@ const TILE_SHELL =
  */
 const REMOTE_TILE =
   `${TILE_SHELL} relative h-full w-full rounded-2xl ` +
-  "lg:aspect-video lg:h-auto lg:max-h-[62vh]";
+  "lg:h-full lg:w-full";
 
 const LOCAL_TILE =
   `${TILE_SHELL} absolute right-3 top-3 z-20 w-[28vw] max-w-[132px] ` +
   "aspect-[3/4] rounded-xl ring-1 ring-white/15 " +
   // lg:relative, not lg:static — the tile has to stay a positioning context or
   // the name plate inside it escapes and lands somewhere else on the page.
-  "lg:relative lg:inset-auto lg:aspect-video lg:w-full lg:max-w-none " +
-  "lg:rounded-2xl lg:ring-0 lg:max-h-[62vh]";
+  "lg:relative lg:inset-auto lg:aspect-auto lg:h-full lg:w-full lg:max-w-none " +
+  "lg:rounded-2xl lg:ring-0";
 
 function RemotePlaceholder({
   phase,
@@ -113,20 +122,31 @@ function RemotePlaceholder({
     );
   }
 
+  /*
+   * Idle. A silhouette on a dark rectangle says nothing about what to do, and
+   * this is the very first thing anyone sees after allowing the camera — the
+   * moment the page has to explain itself or lose the person.
+   */
   return (
-    <svg
-      width="56"
-      height="56"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      className="text-white/25"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="8" r="4" />
-      <path d="M4 21a8 8 0 0 1 16 0" strokeLinecap="round" />
-    </svg>
+    <div className="flex flex-col items-center gap-3 px-6 text-center">
+      <svg
+        width="48"
+        height="48"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        className="text-white/25"
+        aria-hidden="true"
+      >
+        <circle cx="12" cy="8" r="4" />
+        <path d="M4 21a8 8 0 0 1 16 0" strokeLinecap="round" />
+      </svg>
+      <p className="text-[15px] font-medium text-white/70">
+        Whoever you meet appears here
+      </p>
+      <p className="text-[13px] text-white/40">Press Start when you are ready</p>
+    </div>
   );
 }
 
@@ -173,8 +193,9 @@ export function VideoStage({
   const showRemote = Boolean(remoteStream) && phase === "live";
 
   return (
-    // Side by side on a laptop; the reference stacks them because it is a phone.
-    <div className="relative flex min-h-0 flex-1 lg:grid lg:content-center lg:gap-4 lg:grid-cols-2">
+    // Side by side on a laptop, weighted towards the stranger; a phone stacks
+    // them because it has no room to do anything else.
+    <div className="relative flex min-h-0 flex-1 lg:grid lg:gap-4 lg:grid-cols-[1.7fr_1fr]">
       <div className={REMOTE_TILE}>
         <video
           ref={remoteRef}

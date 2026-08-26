@@ -68,6 +68,20 @@ interface Overview {
     coinsOutstanding: number;
   };
   chats: { today: number; week: number; reportsWeek: number };
+  people: Array<{
+    id: string;
+    username: string;
+    email: string;
+    gender: string;
+    verifiedGender: string | null;
+    country: string | null;
+    coins: number;
+    isPremium: boolean;
+    isBanned: boolean;
+    reportsAgainst: number;
+    createdAt: string;
+    lastSeenAt: string | null;
+  }>;
   recentOrders: Array<{
     id: string;
     username: string;
@@ -82,6 +96,22 @@ interface Overview {
 }
 
 const rupees = (paise: number) => "₹" + (paise / 100).toLocaleString("en-IN");
+
+/**
+ * How long ago, in the fewest characters that still say it.
+ *
+ * Absolute timestamps are right for an order, which is a thing that happened;
+ * for a person the useful question is how recently they were here, and
+ * "3d" answers it without arithmetic.
+ */
+function ago(iso: string | null): string {
+  if (!iso) return "never";
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return "now";
+  if (mins < 60) return `${mins}m`;
+  if (mins < 1440) return `${Math.round(mins / 60)}h`;
+  return `${Math.round(mins / 1440)}d`;
+}
 
 function duration(sec: number): string {
   if (sec < 60) return `${sec}s`;
@@ -282,6 +312,74 @@ export default function Admin() {
             v{health.version} · {health.nodeEnv} · up {duration(health.uptimeSec)}
           </Row>
         </dl>
+      </section>
+
+      <section className="mb-7">
+        <H>People ({data.people.length})</H>
+        {data.people.length === 0 ? (
+          <p className="text-sm text-ink-500">Nobody has signed up yet.</p>
+        ) : (
+          <div className="overflow-x-auto rounded-xl bg-white ring-1 ring-ink-200">
+            <table className="w-full min-w-[720px] text-left text-sm">
+              <thead className="border-b border-ink-100 text-xs uppercase tracking-wide text-ink-400">
+                <tr>
+                  <th className="px-3 py-2 font-medium">Who</th>
+                  <th className="px-3 py-2 font-medium">Gender</th>
+                  <th className="px-3 py-2 font-medium">From</th>
+                  <th className="px-3 py-2 font-medium">Coins</th>
+                  <th className="px-3 py-2 font-medium">Joined</th>
+                  <th className="px-3 py-2 font-medium">Last seen</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ink-100">
+                {data.people.map((u) => (
+                  <tr key={u.id}>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-ink-900">{u.username}</span>
+                        {u.isPremium && (
+                          <span className="text-xs text-emerald-700">premium</span>
+                        )}
+                        {u.isBanned && (
+                          <span className="text-xs text-danger-600">banned</span>
+                        )}
+                        {u.reportsAgainst > 0 && (
+                          <span className="text-xs text-amber-700">
+                            {u.reportsAgainst} report{u.reportsAgainst > 1 ? "s" : ""}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-ink-400">{u.email}</div>
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-ink-600">
+                      {u.gender}
+                      {/*
+                        * Only worth showing when it disagrees with what they
+                        * said — agreement is the normal case and repeating it
+                        * on every row buries the rows that differ.
+                        */}
+                      {u.verifiedGender && u.verifiedGender !== u.gender && (
+                        <span className="text-amber-700"> · seen {u.verifiedGender}</span>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-ink-600">
+                      {u.country ?? "—"}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 tabular-nums text-ink-900">
+                      {u.coins}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-ink-500">
+                      {ago(u.createdAt)}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-ink-500">
+                      {ago(u.lastSeenAt)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       <section className="mb-7">

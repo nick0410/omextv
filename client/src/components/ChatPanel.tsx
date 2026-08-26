@@ -45,6 +45,23 @@ export function ChatPanel({
   return (
     <div className="flex flex-1 flex-col overflow-hidden rounded-2xl bg-white ring-1 ring-ink-200">
       <div ref={listRef} className="flex-1 space-y-2 overflow-y-auto p-4">
+        {/*
+          * A tall blank panel beside a call reads as something that failed to
+          * load. Saying what it is costs one line and is only ever seen before
+          * the first message, since anything at all replaces it.
+          */}
+        {messages.length === 0 && (
+          <div className="flex h-full flex-col items-center justify-center gap-1.5 px-6 text-center">
+            <p className="text-sm font-medium text-ink-500">
+              {disabled ? "Messages appear here" : "Say something"}
+            </p>
+            <p className="text-[13px] text-ink-400">
+              {disabled
+                ? "You can type once you are talking to someone."
+                : "Only the person you are talking to can see this."}
+            </p>
+          </div>
+        )}
         {messages.map((message) => {
           const mine = message.senderId === myUserId;
           return (
