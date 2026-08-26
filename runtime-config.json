@@ -1,6 +1,6 @@
 {
-  "_comment": "Where the live API is. Rewritten by scripts/tunnel.ps1; the deployed client reads it at boot so a new tunnel needs no rebuild.",
-  "updatedAt": "2026-08-26T08:50:29Z",
-  "apiUrl": "https://related-apache-studies-calculated.trycloudflare.com",
-  "socketUrl": "https://related-apache-studies-calculated.trycloudflare.com"
+    "_comment":  "Where the live API is. Rewritten by scripts/tunnel.ps1; the deployed client reads it at boot so a new tunnel needs no rebuild.",
+    "updatedAt":  "2026-08-26T13:41:48Z",
+    "apiUrl":  "https://asbestos-celebration-deutsch-wifi.trycloudflare.com",
+    "socketUrl":  "https://asbestos-celebration-deutsch-wifi.trycloudflare.com"
 }
