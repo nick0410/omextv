@@ -31,6 +31,20 @@ export type AuthedSocket = Socket & { user: SocketUser };
 /** Channel used to hand an event to whichever instance owns the socket. */
 export const BUS_CHANNEL = "omextv:emit";
 
+/**
+ * Channel for telling every instance that a call has come up.
+ *
+ * The clock for a per-call charge is started by the client reporting its peer
+ * connection, but the charge itself is held by whichever instance made the
+ * match — and those need not be the same node. A report landing anywhere else
+ * would be dropped, and the call would go free.
+ *
+ * Broadcast rather than addressed, because the sender does not know which
+ * instance is holding it. Every node hears it and only the one with the
+ * pending charge acts.
+ */
+export const CALL_BUS_CHANNEL = "omextv:call-connected";
+
 /** Per-user limiters. Keyed by userId so a reconnect cannot reset the budget. */
 export const queueLimiter = new RateLimiter(env.QUEUE_JOINS_PER_MIN, env.QUEUE_JOINS_PER_MIN / 60);
 export const messageLimiter = new RateLimiter(env.MESSAGES_PER_MIN, env.MESSAGES_PER_MIN / 60);

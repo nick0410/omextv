@@ -3,7 +3,13 @@ import { randomUUID } from "crypto";
 import { env } from "../../config/env";
 import { stores } from "../store";
 import { detach } from "../../utils/detach";
-import { AuthedSocket, getIo, messageLimiter, signalLimiter } from "./context";
+import {
+  AuthedSocket,
+  CALL_BUS_CHANNEL,
+  getIo,
+  messageLimiter,
+  signalLimiter,
+} from "./context";
 import { markCallConnected } from "./billing";
 
 /**
@@ -100,7 +106,21 @@ export function onTyping(socket: AuthedSocket, payload: unknown): void {
  * would let anyone start one against a call they are not in.
  */
 export async function onCallConnected(socket: AuthedSocket): Promise<void> {
-  const pair = await stores().pairing.pairOf(socket.user.id);
+  const store = stores();
+  const pair = await store.pairing.pairOf(socket.user.id);
   if (!pair) return;
+
   markCallConnected(pair.roomId);
+
+  /*
+   * And tell the other instances.
+   *
+   * The charge is held by whichever node made the match, which need not be the
+   * node this socket is on. Locally this is already done; the broadcast is for
+   * the case where it is not, and is a no-op everywhere that holds nothing for
+   * this room.
+   */
+  if (store.kind === "redis") {
+    await store.bus.publish(CALL_BUS_CHANNEL, { roomId: pair.roomId });
+  }
 }

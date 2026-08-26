@@ -6,7 +6,7 @@ import * as matcher from "../matchmaking/matcher";
 import { stores } from "../store";
 import { genderService } from "../gender/service";
 import { detach } from "../../utils/detach";
-import { AuthedSocket, BUS_CHANNEL, getIo, setIo } from "./context";
+import { AuthedSocket, BUS_CHANNEL, CALL_BUS_CHANNEL, getIo, setIo } from "./context";
 import { messageLimiter, queueLimiter, reconnectTimers, signalLimiter } from "./context";
 import {
   LAST_SEEN_THROTTLE_MS,
@@ -19,6 +19,7 @@ import { onConnection } from "./session";
 import { teardownPair } from "./pairs";
 import { emitToUser } from "./delivery";
 import { establishMatch } from "./queue";
+import { markCallConnected } from "./billing";
 import { persistSessionEnd } from "../pairing";
 
 /**
@@ -96,6 +97,13 @@ export function setupSocket(httpServer: HttpServer): Server {
 async function subscribeToBus(): Promise<void> {
   const store = stores();
   if (store.kind !== "redis") return;
+
+  // A call coming up, anywhere. Only the node holding the pending charge for
+  // that room does anything with it.
+  await store.bus.subscribe(CALL_BUS_CHANNEL, (message) => {
+    const roomId = (message as { roomId?: string } | null)?.roomId;
+    if (typeof roomId === "string") markCallConnected(roomId);
+  });
 
   await store.bus.subscribe(BUS_CHANNEL, (message) => {
     const { userId, event, payload } = (message ?? {}) as {

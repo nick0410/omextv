@@ -38,14 +38,54 @@ const FALLBACK_ICE: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
  * candidate was gathered separates "no TURN configured" from "TURN is
  * configured but did not work", which need different fixes.
  */
-function connectionFailureMessage(hasTurn: boolean, sawRelay: boolean): string {
-  if (!hasTurn) {
-    return "Could not connect. Calls between two different networks usually need a TURN relay, which is not configured.";
+/**
+ * How many strangers to try past a failed connection before stopping.
+ *
+ * Three is enough to get past a couple of unlucky pairings and short
+ * enough that a network where nothing will connect says so quickly rather
+ * than cycling silently.
+ */
+const AUTO_ADVANCE_LIMIT = 3;
+
+/**
+ * What to say when a call will not connect.
+ *
+ * Two audiences, and they need different sentences. Whoever runs this needs to
+ * know a relay is missing or unreachable; the person on the call needs to know
+ * it was not their doing and what happens next. The earlier wording only spoke
+ * to the first — "a TURN relay, which is not configured" tells a stranger the
+ * site is broken and leaves them holding it.
+ */
+function connectionFailureMessage(retrying: boolean): string {
+  if (retrying) {
+    return "Could not reach them — some networks will not connect directly. Finding you someone else.";
   }
-  if (!sawRelay) {
-    return "Could not connect — the relay server did not respond. Check the TURN settings.";
-  }
-  return "The connection dropped.";
+  return "Could not connect to the last few people. This happens on some mobile and campus networks. Press Start to try again.";
+}
+
+/**
+ * Whether to try the next stranger, and what to say either way.
+ *
+ * Separated from the peer connection so the decision can be tested as itself.
+ * Inline it was only reachable by driving a real RTCPeerConnection to failure,
+ * which in practice means it would have been tested by copying it into the
+ * test — where it would then agree with itself no matter what the app did.
+ */
+export function decideAfterFailure(
+  failuresSoFar: number,
+  haveFilters: boolean,
+  limit: number = AUTO_ADVANCE_LIMIT,
+): { run: number; willRetry: boolean; message: string } {
+  const run = failuresSoFar + 1;
+  const willRetry = run <= limit && haveFilters;
+  return { run, willRetry, message: connectionFailureMessage(willRetry) };
+}
+
+/** The operator's version of the same fact. Logged, not shown. */
+function relayDiagnosis(hasTurn: boolean, sawRelay: boolean): string {
+  if (!hasTurn) return "No TURN relay is configured, so cross-network calls cannot be relayed.";
+  if (!sawRelay) return "A relay is configured but produced no candidates — check the TURN credentials.";
+  return "A relay was available; the connection dropped for another reason.";
 }
 
 function cameraErrorMessage(err: unknown): string {
@@ -132,6 +172,21 @@ export function useCall() {
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Set while intentionally leaving, so teardown does not look like a drop. */
   const leavingRef = useRef(false);
+
+  /*
+   * What it takes to move on by itself after a failed connection.
+   *
+   * The filters, because rejoining the queue needs them and the failure is
+   * noticed deep inside the peer connection where they are not in scope; and a
+   * count, because a network that fails with one stranger often fails with the
+   * next, and retrying forever would look identical to a frozen page.
+   */
+  const lastFiltersRef = useRef<MatchFilters | null>(null);
+  const failedRunRef = useRef(0);
+  const autoAdvanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // skip is defined below and the handler above closes over this instead,
+  // so neither has to be moved to satisfy the other.
+  const skipRef = useRef<((filters: MatchFilters) => void) | null>(null);
 
   // --- Camera ------------------------------------------------------------
 
@@ -289,11 +344,50 @@ export function useCall() {
 
     peer.onconnectionstatechange = () => {
       const state = peer.connectionState;
-      if (state === "connected") setPhase("live");
-      // "failed" almost always means no relay was available for this pair.
+      if (state === "connected") {
+        failedRunRef.current = 0; // a success ends the run of failures
+        setPhase("live");
+      }
+      /*
+       * Failed almost always means no relay was available for this pair.
+       *
+       * Which is not a reason to stop: NAT behaviour is a property of the two
+       * networks, not of this person, so the next stranger may well work. The
+       * old behaviour left them on a dead screen holding a sentence about TURN
+       * relays, with Skip as the unmarked way out — and someone who thinks the
+       * site is broken does not go looking for it.
+       *
+       * Bounded, because retrying without end looks exactly like a page that
+       * has frozen, and on a network where nothing will ever connect that is
+       * what it would become.
+       */
       if (state === "failed") {
-        setError(connectionFailureMessage(hasTurnRef.current, sawRelayRef.current));
+        const filters = lastFiltersRef.current;
+        const { run, willRetry, message } = decideAfterFailure(
+          failedRunRef.current,
+          Boolean(filters),
+        );
+        failedRunRef.current = run;
+
+        setError(message);
         setPhase("partner-lost");
+
+        // The technical reason still matters, to whoever is running this
+        // rather than to whoever is on the call. It goes where they will look
+        // for it, and where a stranger will not read it by accident.
+        console.warn(
+          "[omextv] call failed:",
+          relayDiagnosis(hasTurnRef.current, sawRelayRef.current),
+          `(attempt ${failedRunRef.current})`,
+        );
+
+        if (!willRetry || !filters) return;
+        if (autoAdvanceTimer.current) clearTimeout(autoAdvanceTimer.current);
+        // Long enough to read the line, short enough not to feel stuck.
+        autoAdvanceTimer.current = setTimeout(() => {
+          autoAdvanceTimer.current = null;
+          skipRef.current?.(filters);
+        }, 2200);
       }
     };
 
@@ -500,12 +594,18 @@ export function useCall() {
        * so is hidden behind it.
        */
       setRestrictedFilters([]);
+      lastFiltersRef.current = filters;
+      failedRunRef.current = 0; // a deliberate start is a fresh run
       getSocket().emit("join-queue", filters);
     },
     [startCamera],
   );
 
   const cancelQueue = useCallback(() => {
+    if (autoAdvanceTimer.current) {
+      clearTimeout(autoAdvanceTimer.current);
+      autoAdvanceTimer.current = null;
+    }
     getSocket().emit("leave-queue");
     setPhase("idle");
   }, []);
@@ -522,14 +622,24 @@ export function useCall() {
       setMessages([]);
       // Straight back into the queue: that is what "next" means here.
       setRestrictedFilters([]);
+      lastFiltersRef.current = filters;
       getSocket().emit("join-queue", filters);
     },
     [teardownPeer],
   );
 
+  // Published for the failure handler, which is built before this exists.
+  skipRef.current = skip;
+
   const endChat = useCallback(() => {
     const room = roomRef.current;
     leavingRef.current = true;
+    // Hanging up cancels a queued retry; otherwise it fires afterwards and
+    // drags them back into a search they just left.
+    if (autoAdvanceTimer.current) {
+      clearTimeout(autoAdvanceTimer.current);
+      autoAdvanceTimer.current = null;
+    }
     teardownPeer();
     if (room) getSocket().emit("end-chat", { roomId: room });
     roomRef.current = null;
