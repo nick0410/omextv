@@ -126,24 +126,39 @@ describe("the coin routes are all wrapped", () => {
       }),
     }));
 
-    const { default: coinRoutes } = await import("../routes/coins");
-    const app = express();
-    app.use(express.json());
-    app.use("/api/coins", coinRoutes);
-    app.use((_err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    /*
+     * A real account, not just a well-formed token.
+     *
+     * `authenticate` runs first and now asks the database whether this account
+     * is shut out, which a token naming an account that does not exist is --
+     * a deleted account's token has to stop working. So this case has to get
+     * past a gate that has become stricter than it was, and it does that by
+     * being a genuine user rather than by the gate being loosened.
+     */
+    vi.doMock("../services/ban", () => ({
+      isShutOut: () => Promise.resolve(false),
+      banStatus: () => "none",
+      clearExpiredBan: () => Promise.resolve(),
+    }));
+    vi.resetModules();
+
+    const { default: routes } = await import("../routes/coins");
+    const app2 = express();
+    app2.use(express.json());
+    app2.use("/api/coins", routes);
+    app2.use((_err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
       res.status(500).json({ error: "Internal server error" });
     });
 
-    // A real token: the route's own `authenticate` runs first, and the failure
-    // under test is behind it.
     const token = jwt.sign({ userId: "u1", email: "u1@test.local" }, env.JWT_SECRET, {
       expiresIn: "1h",
     });
-    const res = await request(app)
+    const res = await request(app2)
       .get("/api/coins/me")
       .set({ Authorization: `Bearer ${token}` });
     expect(res.status).toBe(500);
 
+    vi.doUnmock("../services/ban");
     vi.doUnmock("../services/coins");
     vi.resetModules();
   });

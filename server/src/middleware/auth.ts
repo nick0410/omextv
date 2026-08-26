@@ -4,6 +4,7 @@ import { env } from "../config/env";
 import { JWTPayload } from "../types";
 import { prisma } from "../config/database";
 import { asyncRoute } from "../utils/asyncRoute";
+import { isShutOut } from "../services/ban";
 
 declare global {
   namespace Express {
@@ -13,7 +14,29 @@ declare global {
   }
 }
 
-export function authenticate(req: Request, res: Response, next: NextFunction): void {
+/**
+ * Who is asking, and whether they are still allowed to ask.
+ *
+ * The token settles the first question on its own. The second needs the
+ * account, because a token lasts seven days and says nothing about what has
+ * happened since it was issued -- somebody banned an hour ago still holds a
+ * perfectly valid one.
+ *
+ * Folded in here rather than added to the routes that seemed to matter. That
+ * list was already being kept by hand and already had a hole in it: the ban
+ * was enforced on the socket alone, so it stopped the calls and left signing
+ * in, buying coins and reporting other people open. A rule applied at the door
+ * everything comes through cannot be forgotten on the way in.
+ *
+ * Costs one query per authenticated request. These routes are profile, wallet
+ * and orders, none of which is hit in a loop; the busy path is the socket,
+ * which asks once per connection rather than once per event.
+ */
+export const authenticate = asyncRoute(async function authenticate(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) {
     res.status(401).json({ error: "No token provided" });
@@ -22,14 +45,22 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
 
   const token = authHeader.split(" ")[1];
 
+  let decoded: JWTPayload;
   try {
-    const decoded = jwt.verify(token, env.JWT_SECRET) as JWTPayload;
-    req.user = decoded;
-    next();
+    decoded = jwt.verify(token, env.JWT_SECRET) as JWTPayload;
   } catch {
     res.status(401).json({ error: "Invalid or expired token" });
+    return;
   }
-}
+
+  if (await isShutOut(decoded.userId)) {
+    res.status(403).json({ error: "This account has been suspended." });
+    return;
+  }
+
+  req.user = decoded;
+  next();
+});
 
 export function optionalAuth(req: Request, _res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;

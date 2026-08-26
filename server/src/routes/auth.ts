@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { prisma } from "../config/database";
+import { banStatus, clearExpiredBan } from "../services/ban";
 import { hashPassword, comparePassword, generateToken } from "../utils/auth";
 import { registerSchema, loginSchema } from "../utils/validation";
 import { authenticate } from "../middleware/auth";
@@ -75,6 +76,21 @@ router.post("/login", loginLimiter, async (req: Request, res: Response) => {
       res.status(401).json({ error: "Invalid email or password" });
       return;
     }
+
+    /*
+     * A banned account gets no token.
+     *
+     * Only the socket refused them before, so a ban stopped the calls and left
+     * everything else open: signing in, buying coins, filing reports against
+     * the people who reported them. Checked after the password so this cannot
+     * be used to find out which addresses are banned.
+     */
+    const ban = banStatus(user);
+    if (ban === "active") {
+      res.status(403).json({ error: "This account has been suspended." });
+      return;
+    }
+    if (ban === "expired") await clearExpiredBan(user.id);
 
     const token = generateToken({ userId: user.id, email: user.email });
 

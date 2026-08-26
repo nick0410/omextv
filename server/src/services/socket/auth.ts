@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 import { env } from "../../config/env";
 import { prisma } from "../../config/database";
 import { Gender, InferredGender, JWTPayload } from "../../types";
+import { banStatus, clearExpiredBan } from "../ban";
 import { AuthedSocket } from "./context";
 
 /**
@@ -44,16 +45,12 @@ export async function authMiddleware(socket: Socket, next: (err?: Error) => void
 
     if (!user) return next(new Error("User not found"));
 
-    // A ban that has expired should not keep anyone out.
+    // A ban that has expired should not keep anyone out. The rule lives in
+    // services/ban so the HTTP side applies exactly the same one.
     const now = Date.now();
-    if (user.isBanned) {
-      const stillBanned = !user.bannedUntil || user.bannedUntil.getTime() > now;
-      if (stillBanned) return next(new Error("Account suspended"));
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { isBanned: false, bannedUntil: null },
-      });
-    }
+    const ban = banStatus(user, now);
+    if (ban === "active") return next(new Error("Account suspended"));
+    if (ban === "expired") await clearExpiredBan(user.id);
 
     // Likewise, premium that lapsed must not keep granting priority.
     const premiumActive =
