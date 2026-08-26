@@ -13,7 +13,7 @@ import {
 import { emitToUser } from "./delivery";
 import { livePairFor, onLeaveChat, teardownPair } from "./pairs";
 import { onJoinQueue, onLeaveQueue } from "./queue";
-import { onChatMessage, onSignal, onTyping } from "./messaging";
+import { onCallConnected, onChatMessage, onSignal, onTyping } from "./messaging";
 import { isGenderVerified, onVerifyGender } from "./verification";
 import { coins } from "../coins";
 
@@ -147,6 +147,10 @@ function registerHandlers(socket: AuthedSocket, ready: Promise<void>): void {
   socket.on("answer", (payload) => gate("socket:answer", () => onSignal(socket, "answer", payload)));
   socket.on("ice-candidate", (payload) =>
     gate("socket:ice-candidate", () => onSignal(socket, "ice-candidate", payload)));
+
+  // The clock for a per-call charge starts here, not at the match: being
+  // paired is not being connected.
+  socket.on("call-connected", () => gate("socket:call-connected", () => onCallConnected(socket)));
 
   socket.on("chat-message", (payload) => gate("socket:chat-message", () => onChatMessage(socket, payload)));
   socket.on("typing", (payload) => gate("socket:typing", () => onTyping(socket, payload)));

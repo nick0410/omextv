@@ -8,7 +8,12 @@ import { genderService } from "../gender/service";
 import { detach } from "../../utils/detach";
 import { AuthedSocket, BUS_CHANNEL, getIo, setIo } from "./context";
 import { messageLimiter, queueLimiter, reconnectTimers, signalLimiter } from "./context";
-import { LAST_SEEN_THROTTLE_MS, callChargeTimers, lastSeenWrites } from "./context";
+import {
+  LAST_SEEN_THROTTLE_MS,
+  callChargeTimers,
+  lastSeenWrites,
+  pendingCallCharges,
+} from "./context";
 import { authMiddleware } from "./auth";
 import { onConnection } from "./session";
 import { teardownPair } from "./pairs";
@@ -177,6 +182,7 @@ export async function shutdownSocket(): Promise<void> {
    */
   for (const timer of callChargeTimers.values()) clearTimeout(timer);
   callChargeTimers.clear();
+  pendingCallCharges.clear();
   lastSeenWrites.clear();
 
   const pairs = await stores().pairing.allPairs();

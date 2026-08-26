@@ -271,7 +271,20 @@ export function useCall() {
      */
     peer.oniceconnectionstatechange = () => {
       const state = peer.iceConnectionState;
-      if (state === "connected" || state === "completed") setPhase("live");
+      if (state === "connected" || state === "completed") {
+        setPhase("live");
+        /*
+         * Tell the server the call is genuinely up.
+         *
+         * It relays the handshake but cannot see the result: an offer and an
+         * answer crossing prove both ends reached the server, not each other.
+         * Only this connection knows, and the server needs to know because a
+         * per-call charge hangs on it — a pairing that never connects must not
+         * cost anybody anything. Sent on both ends and on a reconnect; the
+         * server takes the first and ignores the rest.
+         */
+        socket.emit("call-connected", {});
+      }
     };
 
     peer.onconnectionstatechange = () => {

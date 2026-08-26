@@ -49,6 +49,26 @@ export const reconnectTimers = new Map<string, NodeJS.Timeout>();
 export const callChargeTimers = new Map<string, NodeJS.Timeout>();
 
 /**
+ * Calls that will be charged for if they ever connect.
+ *
+ * Who owes is known when the match is made, but whether there is anything to
+ * charge for is not known until the two ends actually reach each other. A
+ * charge scheduled at match time bills for a call that may never happen —
+ * which, without a relay configured, is a large share of them.
+ *
+ * Kept keyed by room and consumed once, so a second "connected" from a
+ * reconnect cannot start a second clock against the same call.
+ */
+export const pendingCallCharges = new Map<string, PendingCharge>();
+
+export interface PendingCharge {
+  /** The people who owe for this call, if it connects. */
+  owing: { userId: string }[];
+  /** Set once the first end reports the call up, so it cannot restart. */
+  started: boolean;
+}
+
+/**
  * When each user's lastSeenAt was last written.
  *
  * Throttled because reconnects are not rare — a dropped tunnel reconnects

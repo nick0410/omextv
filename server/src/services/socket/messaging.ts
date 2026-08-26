@@ -4,6 +4,7 @@ import { env } from "../../config/env";
 import { stores } from "../store";
 import { detach } from "../../utils/detach";
 import { AuthedSocket, getIo, messageLimiter, signalLimiter } from "./context";
+import { markCallConnected } from "./billing";
 
 /**
  * Everything that travels between two people already in a room: the WebRTC
@@ -85,4 +86,21 @@ export function onTyping(socket: AuthedSocket, payload: unknown): void {
     if (!(await stores().pairing.isMember(socket.user.id, roomId))) return;
     socket.to(roomId).emit("typing", { userId: socket.user.id, isTyping: isTyping === true });
   })(), "socket:background");
+}
+
+/**
+ * One end reporting that the call is actually up.
+ *
+ * The server relays the handshake but never learns whether it worked: an offer
+ * and an answer crossing say the two ends are talking to this server, not to
+ * each other. Only the peer connection knows, so only the client can say.
+ *
+ * The room is taken from the pair on record rather than from the payload —
+ * this starts a clock that ends in a charge, and a client-supplied room id
+ * would let anyone start one against a call they are not in.
+ */
+export async function onCallConnected(socket: AuthedSocket): Promise<void> {
+  const pair = await stores().pairing.pairOf(socket.user.id);
+  if (!pair) return;
+  markCallConnected(pair.roomId);
 }

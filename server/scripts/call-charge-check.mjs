@@ -114,6 +114,11 @@ async function main() {
 
   check("nothing charged yet", (await balance(chooser.id)) === 200);
 
+  // What a real client sends once its peer connection comes up. Until this
+  // arrives the pair exists but no call does, and nothing is billable.
+  sc.emit("call-connected", {});
+  sp.emit("call-connected", {});
+
   // Past the threshold.
   await wait(18_000);
 
@@ -154,6 +159,10 @@ async function main() {
   const m2 = await quickMatch;
 
   if (m2) {
+    // Connected, then left — otherwise this passes for the wrong reason,
+    // being free because nothing ever charged rather than because it was short.
+    sq.emit("call-connected", {});
+    so.emit("call-connected", {});
     // Leave well before the threshold.
     await wait(3_000);
     sq.emit("end-chat", { roomId: m2.roomId });
@@ -169,6 +178,44 @@ async function main() {
 
   sq.close();
   so.close();
+  await wait(9_000);
+
+  // --- a call that never connected --------------------------------------
+  //
+  // The one that was being charged for. Without a relay configured this is a
+  // large share of real pairings: the room is made, both people look at a
+  // black rectangle, and nobody should pay for it. No call-connected is sent,
+  // which is exactly what a client whose peer connection never came up does.
+  const stuck = await register("male", 200);
+  const nobody = await register("female", 0);
+  const ss = await connect(stuck.token);
+  const sn = await connect(nobody.token);
+
+  const m3 = once(sn, "match-found", 30_000);
+  ss.emit("join-queue", { gender: "female", countries: [], city: null });
+  await wait(300);
+  sn.emit("join-queue", { gender: "any", countries: [], city: null });
+  const match3 = await m3;
+
+  if (match3) {
+    await wait(18_000);
+    check(
+      "a call that never connected is free",
+      (await balance(stuck.id)) === 200,
+      `${await balance(stuck.id)} coins`,
+    );
+    check(
+      "and nothing reached the ledger",
+      (await prisma.coinLedger.count({ where: { userId: stuck.id } })) === 0,
+    );
+    ss.emit("end-chat", { roomId: match3.roomId });
+  } else {
+    check("a call that never connected is free", false, "never matched");
+  }
+
+  await wait(500);
+  ss.close();
+  sn.close();
 
   console.log(
     `\n${failures === 0 ? `All ${total} checks passed.` : `${failures} of ${total} FAILED.`}\n`,
