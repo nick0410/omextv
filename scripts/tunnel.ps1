@@ -51,15 +51,41 @@ try {
   throw "The API is not responding on :3001. Start it with: cd server; npm run dev"
 }
 
+# Only one of these may run at a time.
+#
+# The watchdog starts this script when it finds the tunnel dead, and so does a
+# person at a prompt. Both did, eighty seconds apart. The second run killed the
+# first run's cloudflared, and the first run — already past its own checks —
+# published a hostname that by then belonged to nothing. The live site pointed
+# at a 530 for the rest of the evening while a perfectly good tunnel ran beside
+# it, which is the exact failure this script exists to prevent.
+#
+# The lock is a file holding the owner's process id, so a run killed before it
+# could clean up does not block the next one forever.
+$lockPath = Join-Path $env:TEMP 'omextv-tunnel.lock'
+if (Test-Path $lockPath) {
+  $holder = (Get-Content $lockPath -ErrorAction SilentlyContinue | Select-Object -First 1)
+  $alive = $holder -and (Get-Process -Id $holder -ErrorAction SilentlyContinue)
+  if ($alive) {
+    Write-Host "Another tunnel run (pid $holder) is already working. Leaving it alone."
+    exit 0
+  }
+  Write-Host "Clearing a stale lock from pid $holder."
+  Remove-Item $lockPath -Force -ErrorAction SilentlyContinue
+}
+Set-Content -Path $lockPath -Value $PID -Encoding ascii
+
+try {
+
 Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 2
 
 $log = Join-Path $env:TEMP 'omextv-tunnel.log'
 Remove-Item $log -Force -ErrorAction SilentlyContinue
 
-Start-Process -FilePath $exe `
+$proc = Start-Process -FilePath $exe `
   -ArgumentList 'tunnel', '--url', 'http://localhost:3001', '--protocol', 'http2', '--no-autoupdate' `
-  -RedirectStandardError $log -WindowStyle Hidden
+  -RedirectStandardError $log -WindowStyle Hidden -PassThru
 
 # Matching several hyphenated words, not just any trycloudflare host.
 #
@@ -88,7 +114,12 @@ if (-not $url) { throw "Tunnel did not come up. See $log" }
 # one and then exit, and publishing at that point points the live site at
 # something that will never answer. Checked before anything is published,
 # because the published document is what every visitor reads.
-if (-not (Get-Process cloudflared -ErrorAction SilentlyContinue)) {
+# Specifically the process this run started, not merely some cloudflared.
+#
+# Asking whether *any* cloudflared is running is what let the losing run of a
+# race publish: its own tunnel had been killed, but the winner's process was
+# alive and answered for it, so the check passed and a dead hostname went out.
+if ($proc.HasExited -or -not (Get-Process -Id $proc.Id -ErrorAction SilentlyContinue)) {
   throw "cloudflared exited after starting. See $log"
 }
 
@@ -103,15 +134,28 @@ Write-Host "Tunnel: $url"
 # leave the deployed site pointing at the *previous*, genuinely dead tunnel,
 # which is far worse than deploying one this machine merely cannot see.
 $ok = $false
+$refused = $false
 foreach ($i in 1..20) {
   try {
     Invoke-RestMethod -Uri "$url/health" -TimeoutSec 10 | Out-Null
     $ok = $true
     break
-  } catch { Start-Sleep -Seconds 5 }
+  } catch {
+    # Tell "this machine cannot see it" apart from "Cloudflare says it is not
+    # there". The first is a local resolver problem and everyone else is served
+    # fine; the second is Cloudflare answering, on this exact hostname, that no
+    # tunnel is attached to it. Publishing through the first is right.
+    # Publishing through the second is how the site ends up on a 530.
+    $code = $null
+    if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }
+    if ($code -in 530, 1033, 502, 404) { $refused = $true; break }
+    Start-Sleep -Seconds 5
+  }
 }
 if ($ok) {
   Write-Host 'Tunnel is serving.' -ForegroundColor Green
+} elseif ($refused) {
+  throw "Cloudflare answered $url with no tunnel attached. Refusing to publish an address that cannot serve."
 } else {
   Write-Warning "Could not reach $url from this machine (likely local DNS). Deploying anyway."
 }
@@ -211,3 +255,10 @@ Write-Host ''
 Write-Host "Live:   https://omextv.vercel.app"
 Write-Host "API:    $url"
 Write-Host "Log:    $log"
+
+}
+finally {
+  # However this ended — published, thrown, or interrupted — the next run must
+  # not find a lock nobody owns.
+  Remove-Item $lockPath -Force -ErrorAction SilentlyContinue
+}

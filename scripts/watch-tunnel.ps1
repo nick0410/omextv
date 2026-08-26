@@ -117,6 +117,63 @@ function Get-UnpushedCount {
   }
 }
 
+<#
+  Write the address of the tunnel that is actually running, and push it.
+
+  Same shape as tunnel.ps1's publish step, including the missing byte-order
+  mark — GitHub serves this file as text/plain and a BOM makes every consumer
+  that parses the text itself fail on the first character.
+#>
+function Publish-Url($url) {
+  $repo = Join-Path $PSScriptRoot '..'
+  $path = Join-Path $repo 'runtime-config.json'
+  $config = [ordered]@{
+    _comment  = 'Where the live API is. Rewritten by scripts/tunnel.ps1; the deployed client reads it at boot so a new tunnel needs no rebuild.'
+    updatedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    apiUrl    = $url
+    socketUrl = $url
+  }
+  [System.IO.File]::WriteAllText($path, ($config | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
+
+  Push-Location $repo
+  try {
+    git add runtime-config.json
+    git commit -q -m "Point the client at $url"
+    if ($LASTEXITCODE -ne 0) { return $false }
+    git push -q origin main
+    return ($LASTEXITCODE -eq 0)
+  } catch {
+    return $false
+  } finally {
+    Pop-Location
+  }
+}
+
+<#
+  Does the address we publish match the tunnel that is actually running?
+
+  Every other check here asks whether *a* tunnel is healthy. None of them asked
+  whether it is the one visitors are sent to, and those came apart: two runs of
+  tunnel.ps1 raced, the loser published a hostname its own cloudflared had
+  already lost, and the push succeeded. Nothing was unpushed, the running
+  tunnel served 200 to every probe, and the live site was on a 530 — healthy by
+  every question being asked, down for everyone.
+
+  Local on purpose, for the same reason Get-UnpushedCount is: the committed
+  file is what the push sends, so reading it here answers the question without
+  needing the network that is usually the thing at fault.
+#>
+function Get-PublishedUrl {
+  $path = Join-Path $PSScriptRoot '..untime-config.json'
+  if (-not (Test-Path $path)) { return $null }
+  try {
+    $raw = [System.IO.File]::ReadAllText($path).TrimStart([char]0xFEFF)
+    return ($raw | ConvertFrom-Json).apiUrl
+  } catch {
+    return $null
+  }
+}
+
 function Publish-Pending {
   $repo = Join-Path $PSScriptRoot '..'
   Push-Location $repo
@@ -176,6 +233,20 @@ for (;;) {
         Say 'pushed; visitors will pick it up within a few minutes' 'Green'
       } else {
         Say 'push failed - run: git push origin main' 'Red'
+      }
+    }
+
+    # Serving is not the same as being the address visitors are given.
+    #
+    # Restarting would be the wrong remedy here: this tunnel works. What is
+    # wrong is the document naming a different one, so that is what gets fixed.
+    $published = Get-PublishedUrl
+    if ($published -and $published -ne $url) {
+      Say "published address is $published but the live tunnel is $url" 'Red'
+      if (Publish-Url $url) {
+        Say "republished; visitors will be sent to $url" 'Green'
+      } else {
+        Say 'could not republish - run: powershell -File scripts/tunnel.ps1' 'Red'
       }
     }
     # MinValue means the first healthy check always prints, so the log shows
