@@ -628,8 +628,17 @@ export function useCall() {
     [teardownPeer],
   );
 
-  // Published for the failure handler, which is built before this exists.
-  skipRef.current = skip;
+  /*
+   * Published for the failure handler, which is built before this exists.
+   *
+   * In an effect rather than assigned during render: React may render without
+   * committing, and a ref written on a render that is thrown away leaves the
+   * handler pointing at a closure from a tree that never existed. Committed is
+   * the only moment that is true.
+   */
+  useEffect(() => {
+    skipRef.current = skip;
+  }, [skip]);
 
   const endChat = useCallback(() => {
     const room = roomRef.current;

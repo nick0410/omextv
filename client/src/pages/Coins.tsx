@@ -11,6 +11,7 @@ import type {
   CoinPass,
   GatewayInstruction,
   PaymentInstruction,
+  TransferInstruction,
 } from "../lib/types";
 
 /**
@@ -343,6 +344,20 @@ function Section({ title, children }: { title: string; children: React.ReactNode
  * it plainly and explains where to find it rather than treating it as a
  * formality.
  */
+/**
+ * Which checkout to show. Deliberately holds no state of its own.
+ *
+ * The two kinds used to be one component with the hosted case returning early,
+ * above five useStates and a useEffect. React counts hooks per render and
+ * requires the same ones every time, so the moment a mounted checkout changed
+ * kind -- a UPI order reopened once a gateway is configured, or the reverse --
+ * it would render a different number of them and throw, taking the page with
+ * it and the payment in progress on it.
+ *
+ * A branch that chooses between two components cannot do that. Each side keeps
+ * its own hooks, unconditionally, and switching kind remounts rather than
+ * renumbering.
+ */
 function Checkout({
   checkout,
   onDone,
@@ -359,6 +374,20 @@ function Checkout({
   if (payment.kind === "gateway") {
     return <GatewayCheckout order={order} payment={payment} onDone={onDone} onCancel={onCancel} />;
   }
+  return <UpiCheckout order={order} payment={payment} onDone={onDone} onCancel={onCancel} />;
+}
+
+function UpiCheckout({
+  order,
+  payment,
+  onDone,
+  onCancel,
+}: {
+  order: CoinOrder;
+  payment: TransferInstruction;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
   const [qr, setQr] = useState<string | null>(null);
   const [reference, setReference] = useState("");
   const [busy, setBusy] = useState(false);

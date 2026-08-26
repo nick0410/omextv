@@ -13,24 +13,41 @@ import { onServerWaking } from "../lib/axios";
  * warm server never shows it.
  */
 export function WakingNotice() {
-  const [waking, setWaking] = useState(false);
+  /*
+   * When the wait began, and how long it has run.
+   *
+   * The count used to be reset by an effect whenever the wait ended -- a
+   * render spent undoing a number nobody can see, since this returns null when
+   * it is not waking, and a second place that had to agree with the timer
+   * about when a wait starts. It is reset where the wait actually starts
+   * instead, in the callback that hears about it.
+   *
+   * Not computed from Date.now() during render either: that makes what is
+   * drawn depend on when it was drawn, so two renders of the same state
+   * disagree.
+   */
+  const [startedAt, setStartedAt] = useState<number | null>(null);
   const [seconds, setSeconds] = useState(0);
 
-  useEffect(() => onServerWaking(setWaking), []);
+  useEffect(
+    () =>
+      onServerWaking((waking) => {
+        setStartedAt(waking ? Date.now() : null);
+        setSeconds(0);
+      }),
+    [],
+  );
 
   useEffect(() => {
-    if (!waking) {
-      setSeconds(0);
-      return;
-    }
-    const started = Date.now();
-    const timer = setInterval(() => {
-      setSeconds(Math.round((Date.now() - started) / 1000));
-    }, 1000);
+    if (startedAt === null) return;
+    const timer = setInterval(
+      () => setSeconds(Math.round((Date.now() - startedAt) / 1000)),
+      1000,
+    );
     return () => clearInterval(timer);
-  }, [waking]);
+  }, [startedAt]);
 
-  if (!waking) return null;
+  if (startedAt === null) return null;
 
   return (
     <div
