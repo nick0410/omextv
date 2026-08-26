@@ -274,7 +274,7 @@ export default function Chat() {
         </div>
       )}
 
-      <main className="mx-auto flex w-full min-h-0 max-w-[1400px] flex-1 flex-col gap-3 px-3 pb-3 pt-3 lg:grid lg:grid-cols-[1fr_340px] lg:gap-6 lg:px-5 lg:py-5">
+      <main className="mx-auto flex w-full min-h-0 max-w-[1400px] flex-1 flex-col gap-3 px-3 pb-3 pt-3 lg:grid lg:grid-cols-[1fr_340px] lg:grid-rows-[minmax(0,1fr)] lg:gap-6 lg:px-5 lg:py-5">
         <div className="flex min-h-0 flex-1 flex-col gap-3 lg:gap-4">
           <VideoStage
             localStream={localStream}
@@ -333,7 +333,7 @@ export default function Chat() {
         )}
 
         <aside
-          className={`z-50 flex flex-col gap-4 max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:h-[72dvh] max-lg:rounded-t-2xl max-lg:bg-ink-50 max-lg:p-3 max-lg:pb-[max(0.75rem,env(safe-area-inset-bottom))] max-lg:shadow-[0_-8px_40px_rgba(15,23,42,0.18)] max-lg:transition-transform lg:min-h-[520px] ${
+          className={`z-50 flex flex-col gap-4 max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:h-[72dvh] max-lg:rounded-t-2xl max-lg:bg-ink-50 max-lg:p-3 max-lg:pb-[max(0.75rem,env(safe-area-inset-bottom))] max-lg:shadow-[0_-8px_40px_rgba(15,23,42,0.18)] max-lg:transition-transform lg:min-h-0 ${
             sheetOpen ? "max-lg:translate-y-0" : "max-lg:translate-y-full"
           }`}
         >
