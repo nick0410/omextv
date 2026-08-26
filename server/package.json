@@ -23,7 +23,8 @@
     "coins:check": "node scripts/coin-check.mjs",
     "match:speed": "node scripts/match-speed.mjs",
     "smoke": "node scripts/smoke-match.mjs",
-    "probe": "node scripts/probe.mjs && node scripts/probe2.mjs"
+    "probe": "node scripts/probe.mjs && node scripts/probe2.mjs",
+    "hostile": "node scripts/hostile.mjs"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

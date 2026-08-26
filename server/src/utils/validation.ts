@@ -40,6 +40,11 @@ const emailSchema = z
   .string()
   .trim()
   .toLowerCase()
+  // 254 is the longest an address can be and still be deliverable (RFC 5321).
+  // Without a bound, `email()` accepted three hundred characters of "a" and
+  // the row went into the database at whatever length was sent, to be printed
+  // back out on the admin page and in any mail this ever sends.
+  .max(254, "That address is too long")
   .email("Invalid email");
 
 export const registerSchema = z.object({

@@ -166,14 +166,44 @@ app.get("*", (_req, res) => {
   });
 });
 
-// Express error handler must come last and take four args to be recognised.
+/*
+ * Express error handler. Must come last and take four args to be recognised.
+ *
+ * The distinction it draws is between a request that was wrong and a server
+ * that was: a truncated body, or one that is not an object, is the client's
+ * mistake and answering 500 tells them to retry something that will never
+ * work. It also filled the log with "unhandled error" for input that was
+ * handled perfectly well, which is how a real fault ends up buried.
+ *
+ * Nothing about the error itself is returned. The message can name a table, a
+ * column or a file path, and a 500 body is the wrong place for any of that.
+ */
 app.use(
   (
-    err: Error,
+    err: Error & { status?: number; statusCode?: number; type?: string },
     _req: express.Request,
     res: express.Response,
     _next: express.NextFunction,
   ) => {
+    // body-parser marks its own failures and sets a status; anything else that
+    // arrives here is ours.
+    const parseFailed =
+      err instanceof SyntaxError ||
+      err.type === "entity.parse.failed" ||
+      err.type === "entity.verify.failed";
+    const tooLarge = err.type === "entity.too.large";
+
+    if (parseFailed || tooLarge) {
+      const status = tooLarge ? 413 : 400;
+      // Logged quietly and without a stack: this is traffic, not a fault.
+      console.warn(`[http] rejected a malformed request body (${status})`);
+      if (res.headersSent) return;
+      res.status(status).json({
+        error: tooLarge ? "That was too large." : "That request body was not valid JSON.",
+      });
+      return;
+    }
+
     console.error("[http] unhandled error:", err);
     if (res.headersSent) return;
     res.status(500).json({ error: "Internal server error" });
