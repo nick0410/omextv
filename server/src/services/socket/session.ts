@@ -140,8 +140,35 @@ function registerHandlers(socket: AuthedSocket, ready: Promise<void>): void {
   const gate = (context: string, run: () => void | Promise<void>) =>
     detach(ready.then(run), context);
 
-  socket.on("join-queue", (payload) => gate("socket:join-queue", () => onJoinQueue(socket, payload)));
-  socket.on("leave-queue", () => gate("socket:leave-queue", () => onLeaveQueue(socket)));
+  /*
+   * The same, but one at a time.
+   *
+   * `gate` chains every handler off the same settled promise, so they all
+   * start together and then interleave at their first await. For anything that
+   * only reads -- signalling, chat, typing -- that is fine and desirable.
+   *
+   * For the handlers that decide whether somebody is in a chat it is a race,
+   * and it is the one behind "You are already in a chat". The client skips and
+   * asks for the next person in the same tick, exactly as it should; skip
+   * reaches its first await and yields, join-queue reads the pair that skip is
+   * in the middle of removing, and refuses. The person is then in neither a
+   * chat nor a queue, looking at a screen that will never change. Measured at
+   * sixteen people skipping together: twelve left nowhere.
+   *
+   * Serialising these puts them back in arrival order for real. It is per
+   * socket, so one person's slow teardown cannot hold up anybody else, and the
+   * chain is repaired on failure so one rejection cannot wedge the rest.
+   */
+  let turn: Promise<void> = ready;
+  const inTurn = (context: string, run: () => void | Promise<void>) => {
+    turn = turn.then(run).catch((err) => {
+      console.error(`[${context}] failed:`, err);
+    });
+    detach(turn, context);
+  };
+
+  socket.on("join-queue", (payload) => inTurn("socket:join-queue", () => onJoinQueue(socket, payload)));
+  socket.on("leave-queue", () => inTurn("socket:leave-queue", () => onLeaveQueue(socket)));
 
   socket.on("offer", (payload) => gate("socket:offer", () => onSignal(socket, "offer", payload)));
   socket.on("answer", (payload) => gate("socket:answer", () => onSignal(socket, "answer", payload)));
@@ -155,8 +182,8 @@ function registerHandlers(socket: AuthedSocket, ready: Promise<void>): void {
   socket.on("chat-message", (payload) => gate("socket:chat-message", () => onChatMessage(socket, payload)));
   socket.on("typing", (payload) => gate("socket:typing", () => onTyping(socket, payload)));
 
-  socket.on("skip", (payload) => gate("socket:skip", () => onLeaveChat(socket, payload, "skip")));
-  socket.on("end-chat", (payload) => gate("socket:end-chat", () => onLeaveChat(socket, payload, "end")));
+  socket.on("skip", (payload) => inTurn("socket:skip", () => onLeaveChat(socket, payload, "skip")));
+  socket.on("end-chat", (payload) => inTurn("socket:end-chat", () => onLeaveChat(socket, payload, "end")));
 
   socket.on("verify-gender", (payload, ack) =>
     gate("socket:verify-gender", () => onVerifyGender(socket, payload, ack)));
@@ -171,7 +198,7 @@ function registerHandlers(socket: AuthedSocket, ready: Promise<void>): void {
     });
   });
 
-  socket.on("disconnect", (reason) => gate("socket:disconnect", () => onDisconnect(socket, reason)));
+  socket.on("disconnect", (reason) => inTurn("socket:disconnect", () => onDisconnect(socket, reason)));
 }
 
 async function onDisconnect(socket: AuthedSocket, reason: string): Promise<void> {

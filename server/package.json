@@ -27,7 +27,8 @@
     "hostile": "node scripts/hostile.mjs",
     "hostile:socket": "node scripts/hostile-socket.mjs",
     "enforce": "node -r dotenv/config scripts/enforce-check.mjs dotenv_config_path=.env",
-    "money": "node -r dotenv/config scripts/money-check.mjs dotenv_config_path=.env"
+    "money": "node -r dotenv/config scripts/money-check.mjs dotenv_config_path=.env",
+    "race": "node scripts/race-check.mjs"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
