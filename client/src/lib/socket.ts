@@ -67,6 +67,30 @@ async function healIfMoved(): Promise<void> {
   }
 }
 
+/**
+ * Signing out has to take the connection with it.
+ *
+ * The socket authenticates once, at the handshake, and the server has no
+ * reason to ask again — so clearing the token here left a connection up that
+ * was still the account that had just left: still in presence, still in the
+ * queue, still able to be matched with a stranger who would find nobody there.
+ *
+ * And because this module keeps a single instance, getSocket() handed that
+ * same connection to whoever signed in next on the browser. Their messages
+ * would have been sent as the previous account, and their calls charged to it.
+ *
+ * Watching the store rather than exporting something for the sign-out button
+ * to remember to call: the button is not the only way the token goes away —
+ * the interceptor drops it on any 401 — and a rule that has to be repeated at
+ * each call site is one that eventually is not.
+ *
+ * Subscribed here because this module already depends on the store; the other
+ * direction would be a cycle.
+ */
+useAuthStore.subscribe((state, previous) => {
+  if (previous.token && !state.token) disconnectSocket();
+});
+
 export function disconnectSocket(): void {
   if (socket) {
     socket.disconnect();
