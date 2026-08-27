@@ -1,6 +1,6 @@
 {
     "_comment":  "Where the live API is. Rewritten by scripts/tunnel.ps1; the deployed client reads it at boot so a new tunnel needs no rebuild.",
-    "updatedAt":  "2026-08-27T17:36:52Z",
-    "apiUrl":  "https://gentleman-worldwide-lender-manhattan.trycloudflare.com",
-    "socketUrl":  "https://gentleman-worldwide-lender-manhattan.trycloudflare.com"
+    "updatedAt":  "2026-08-27T17:59:41Z",
+    "apiUrl":  "https://circular-monica-analyses-application.trycloudflare.com",
+    "socketUrl":  "https://circular-monica-analyses-application.trycloudflare.com"
 }
